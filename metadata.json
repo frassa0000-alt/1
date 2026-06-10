@@ -1,5 +1,6 @@
 {
-  "name": "Gih",
-  "description": "Gih Hub - تحميل أفضل المودات، الخرائط، والشيدرز مجاناً بتصميم عصري.",
-  "requestFramePermissions": []
+  "name": "Golden Gih",
+  "description": "Golden Gih Hub - تحميل أفضل المودات، الخرائط، والشيدرز مجاناً بتصميم عصري.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

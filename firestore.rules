@@ -53,10 +53,11 @@ service cloud.firestore {
       return data.keys().hasAll(['uid', 'email']) &&
              data.uid is string && data.uid.size() < 128 &&
              data.email is string && data.email.size() < 256 &&
-             data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             (data.email == '' || data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$")) &&
              (data.get('displayName', '') is string && data.get('displayName', '').size() < 100) &&
              (data.get('photoURL', '') is string && data.get('photoURL', '').size() < 1000) &&
              (data.get('role', 'user') in ['user', 'admin']) &&
+             (data.get('verified', false) is bool) &&
              (data.get('theme', 'dark') in ['dark', 'light']) &&
              (data.get('favorites', []) is list && data.get('favorites', []).size() <= 1000);
     }
@@ -90,17 +91,18 @@ service cloud.firestore {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isSignedIn() && isOwner(userId) && isValidUser(incoming()) && 
                       incoming().uid == userId &&
-                      (incoming().email == "frassa0000@gmail.com" ? incoming().role == 'admin' : incoming().role == 'user') &&
-                      incoming().createdAt == request.time;
+                      ((incoming().email == "frassa0000@gmail.com" && incoming().role == "admin") || (incoming().email != "frassa0000@gmail.com" && incoming().role == "user")) &&
+                      (incoming().createdAt == request.time || incoming().createdAt == null);
       allow update: if isSignedIn() && isOwner(userId) && (
-        // Allow updating specific fields during login or user settings
+        incoming().diff(existing()).affectedKeys().size() == 0 ||
         incoming().diff(existing()).affectedKeys().hasOnly(['lastLogin', 'displayName', 'photoURL', 'favorites', 'theme'])
       ) || isAdmin();
     }
 
     match /games/{gameId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin() && isValidGame(incoming());
+      allow create, update: if isAdmin() && isValidGame(incoming());
+      allow delete: if isAdmin();
     }
 
     match /reports/{reportId} {
