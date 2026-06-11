@@ -10,9 +10,10 @@ interface FavoritesTabProps {
   toggleFavorite: (id: string) => void;
   setLoginMode: (mode: 'options' | 'email-signin' | 'email-signup') => void;
   setShowLoginModal: (show: boolean) => void;
+  onDownload: (title: string, url: string) => void;
 }
 
-export const FavoritesTab: React.FC<FavoritesTabProps> = ({
+export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
   language,
   user,
   userProfile,
@@ -20,6 +21,7 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = ({
   toggleFavorite,
   setLoginMode,
   setShowLoginModal,
+  onDownload,
 }) => {
   return (
     <div className="space-y-6 mt-4">
@@ -125,9 +127,9 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = ({
                     </div>
                     <div className="p-5 pt-0">
                       <button 
-                      onClick={() => window.open(game.downloadUrl, '_blank')}
-                      className={`w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${cardVibe.btnBg}`}
-                    >
+                        onClick={() => onDownload(game.title, game.downloadUrl)}
+                        className={`w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${cardVibe.btnBg}`}
+                      >
                         <Download className="w-4 h-4 text-white" />
                         {language === 'ar' ? 'تحميل مجاني الآن' : 'Instantly Install'}
                       </button>
@@ -166,4 +168,4 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = ({
       )}
     </div>
   );
-};
+});

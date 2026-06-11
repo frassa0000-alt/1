@@ -11,6 +11,7 @@
         "photoURL": { "type": "string", "format": "uri" },
         "favorites": { "type": "array", "items": { "type": "string" } },
         "theme": { "type": "string", "enum": ["dark", "light"] },
+        "minecraftEdition": { "type": "string", "enum": ["java", "bedrock"] },
         "role": { "type": "string", "enum": ["user", "admin"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "lastLogin": { "type": "string", "format": "date-time" }
@@ -44,6 +45,18 @@
         "status": { "type": "string", "enum": ["pending", "resolved"] }
       },
       "required": ["message", "timestamp"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Social links configurations",
+      "type": "object",
+      "properties": {
+        "tiktok": { "type": "string" },
+        "telegram": { "type": "string" },
+        "discord": { "type": "string" },
+        "youtube": { "type": "string" },
+        "twitter": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -58,6 +71,10 @@
     "/reports/{reportId}": {
       "schema": "Report",
       "description": "User feedback and reports"
+    },
+    "/settings/{docId}": {
+      "schema": "SiteSettings",
+      "description": "Site global features"
     }
   }
 }

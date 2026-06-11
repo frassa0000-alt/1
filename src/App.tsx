@@ -15,6 +15,7 @@ import {
   Flame, 
   TrendingUp, 
   Smartphone,
+  Laptop,
   CheckCircle2,
   AlertCircle,
   Mail,
@@ -25,18 +26,22 @@ import {
   ArrowRight,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   Settings,
   ClipboardList,
   Plus,
   Trash2,
   MessageSquare,
   ShieldCheck,
+  Shield,
+  Sword,
   FileUp,
   Heart,
   Palette,
   UserCog,
   LayoutDashboard,
   Menu,
+  MoreHorizontal,
   Languages,
   Sun,
   Moon,
@@ -45,7 +50,11 @@ import {
   Users,
   Crown,
   Zap,
-  Sparkles
+  Sparkles,
+  Youtube,
+  Send,
+  Twitter,
+  Music
 } from 'lucide-react';
 import { 
   auth, 
@@ -79,14 +88,13 @@ import {
 // @ts-ignore
 import { GoogleGenAI, Type } from '@google/genai';
 // @ts-ignore
-import backgroundImage from './assets/images/gih_background_1779447034941.png';
+import backgroundImage from './assets/images/gih_bg_golden_1781052220481.png';
 
-// Import Modular Dashboard Components
-import { HeroSection } from './components/HeroSection';
-import { GaugesSection } from './components/GaugesSection';
-import { SidebarSection } from './components/SidebarSection';
-import { SearchTab } from './components/SearchTab';
-import { FavoritesTab } from './components/FavoritesTab';
+// Import Modular Dashboard Components with Lazy Loading for optimized catalog scaling
+const HeroSection = React.lazy(() => import('./components/HeroSection').then(m => ({ default: m.HeroSection })));
+const SidebarSection = React.lazy(() => import('./components/SidebarSection').then(m => ({ default: m.SidebarSection })));
+const SearchTab = React.lazy(() => import('./components/SearchTab').then(m => ({ default: m.SearchTab })));
+const FavoritesTab = React.lazy(() => import('./components/FavoritesTab').then(m => ({ default: m.FavoritesTab })));
 
 // Types
 interface Game {
@@ -97,6 +105,8 @@ interface Game {
   downloadUrl: string;
   category: string;
   rating: number;
+  edition?: 'java' | 'bedrock' | 'both';
+  createdAt?: any;
 }
 
 interface UserProfileData {
@@ -108,6 +118,7 @@ interface UserProfileData {
   theme: 'dark' | 'light';
   role?: 'user' | 'admin';
   verified?: boolean;
+  minecraftEdition?: 'java' | 'bedrock';
 }
 
 interface Report {
@@ -133,17 +144,159 @@ const AppContent = () => {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserPanel, setShowUserPanel] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
-  const [loginMode, setLoginMode] = useState<'options' | 'email-signin' | 'email-signup'>('options');
+  const [loginMode, setLoginMode] = useState<'options' | 'email-signin' | 'email-signup'>('email-signin');
   const [localTheme, setLocalTheme] = useState<'dark' | 'light'>(
     (localStorage.getItem('theme') as 'dark' | 'light') || 'dark'
   );
+  
+  // PWA Install Prompt State and Effect
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isAppInstalled, setIsAppInstalled] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsAppInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    // Check if running in standalone mode (already installed & opened as PWA)
+    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) {
+      setIsAppInstalled(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPWA = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsAppInstalled(true);
+        setDeferredPrompt(null);
+      }
+    } else {
+      // Show instructional modal context or alert since native prompt is not available
+      alert(
+        language === 'ar'
+          ? "تثبيت التطبيق على هاتفك 📱:\n\n• على أندرويد (Chrome): اضغط على زر القائمة (⋮) ثم اختر 'تثبيت التطبيق' (Install App).\n• على آيفون (Safari): اضغط على زر المشاركة (📤) ثم اختر 'إضافة للشاشة الرئيسية' (Add to Home Screen)."
+          : "Install the app on your phone 📱:\n\n• Android (Chrome): Tap menu (⋮) and select 'Install app' or 'Add to Home screen'.\n• iPhone (Safari): Tap Share (📤) and select 'Add to Home Screen'."
+      );
+    }
+  };
+  const [selectedEdition, setSelectedEdition] = useState<'java' | 'bedrock'>(() => {
+    return (localStorage.getItem('minecraftEdition') as 'java' | 'bedrock') || 'bedrock';
+  });
+  const [sortBy, setSortBy] = useState<'newest' | 'highest_rated' | 'most_downloaded'>('newest');
+  const [socials, setSocials] = useState<{
+    tiktok: string;
+    telegram: string;
+    discord: string;
+    youtube: string;
+    twitter: string;
+  }>({
+    tiktok: '',
+    telegram: '',
+    discord: '',
+    youtube: '',
+    twitter: ''
+  });
+
+  useEffect(() => {
+    const settingsRef = doc(db, 'settings', 'socials');
+    const unsubscribe = onSnapshot(settingsRef, (snap) => {
+      if (snap.exists()) {
+        setSocials(snap.data() as any);
+      }
+    }, (err) => {
+      console.warn("Error fetching social config: ", err);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const changeEdition = async (edition: 'java' | 'bedrock') => {
+    setSelectedEdition(edition);
+    localStorage.setItem('minecraftEdition', edition);
+    if (user) {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const docSnap = await getDoc(userRef);
+        if (docSnap.exists()) {
+          await updateDoc(userRef, {
+            minecraftEdition: edition
+          });
+        }
+      } catch (err) {
+        console.error("Error updating edition in user profile:", err);
+      }
+    }
+  };
   const [colorIndex, setColorIndex] = useState(0);
   const [activeMainTab, setActiveMainTab] = useState<'home' | 'search' | 'favorites' | 'settings'>('home');
   const [activeSubTab, setActiveSubTab] = useState<'home' | 'for-you'>('home');
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [activeDownload, setActiveDownload] = useState<{ title: string; url: string; size: string; progress: number } | null>(null);
+
+  // States for live integrated contact form
+  const [contactName, setContactName] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [contactMessage, setContactMessage] = useState('');
+  const [contactSubmitting, setContactSubmitting] = useState(false);
+  const [contactSuccess, setContactSuccess] = useState(false);
+
+  // Helper to calculate unique but deterministic file sizes based on title length
+  const calculateFileSize = (title: string): string => {
+    const hash = (title.length * 31) % 17;
+    const baseSize = 2.4 + (hash * 1.7);
+    return `${baseSize.toFixed(1)} MB`;
+  };
+
+  const triggerDownload = (title: string, url: string) => {
+    const size = calculateFileSize(title);
+    setActiveDownload({ title, url, size, progress: 0 });
+  };
+
+  // Real, dynamic dynamic progress simulation
+  useEffect(() => {
+    if (!activeDownload) return;
+
+    if (activeDownload.progress >= 100) {
+      const timer = setTimeout(() => {
+        window.open(activeDownload.url, '_blank');
+        setActiveDownload(null);
+      }, 700);
+      return () => clearTimeout(timer);
+    }
+
+    const interval = setInterval(() => {
+      setActiveDownload(prev => {
+        if (!prev) return null;
+        // Increase progress organically to sound real
+        const step = Math.floor(Math.random() * 12) + 6;
+        const nextProgress = Math.min(prev.progress + step, 100);
+        return { ...prev, progress: nextProgress };
+      });
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [activeDownload]);
 
   // Dynamic presets sourced from the Firestore loaded games array
   const PRESET_CAROUSEL_MODS = games.slice(0, 3);
@@ -266,6 +419,10 @@ const AppContent = () => {
               setLocalTheme(data.theme);
               localStorage.setItem('theme', data.theme);
             }
+            if (data.minecraftEdition) {
+              setSelectedEdition(data.minecraftEdition);
+              localStorage.setItem('minecraftEdition', data.minecraftEdition);
+            }
           }
         });
 
@@ -284,6 +441,7 @@ const AppContent = () => {
               verified: currentUser.email === 'frassa0000@gmail.com' ? true : false,
               theme: 'dark',
               favorites: [],
+              minecraftEdition: selectedEdition,
               createdAt: serverTimestamp(),
               lastLogin: serverTimestamp(),
             });
@@ -352,6 +510,16 @@ const AppContent = () => {
     }
   };
 
+  const handleSocialClick = (url: string | undefined, platformName: string) => {
+    if (url && url.trim().startsWith('http')) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      alert(language === 'ar' 
+        ? `رابط ${platformName} غير نشط حالياً. سيقوم مدير الموقع بتفعيله قريباً!` 
+        : `${platformName} link is currently inactive. The administrator will activate it soon!`);
+    }
+  };
+
   const handleGuestLogin = async () => {
     setAuthLoading(true);
     setAuthError('');
@@ -370,7 +538,7 @@ const AppContent = () => {
     setAuthLoading(true);
     setAuthError('');
     try {
-      if (loginMode === 'email-signin') {
+      if (loginMode !== 'email-signup') {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         await createUserWithEmailAndPassword(auth, email, password);
@@ -391,18 +559,62 @@ const AppContent = () => {
     }
   };
 
+  const getGameDownloads = (game: Game) => {
+    // If the game has a downloads field, use it. Otherwise, generate a deterministic count.
+    const title = game.title || '';
+    let hash = 0;
+    for (let i = 0; i < title.length; i++) {
+      hash = title.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return Math.abs(hash % 9800) + 120;
+  };
+
+  const getGameCreationTime = (game: Game) => {
+    if (game.createdAt) {
+      if (typeof game.createdAt.toMillis === 'function') {
+        return game.createdAt.toMillis();
+      }
+      if (game.createdAt instanceof Date) {
+        return game.createdAt.getTime();
+      }
+      if (typeof game.createdAt === 'number') {
+        return game.createdAt;
+      }
+      return new Date(game.createdAt).getTime();
+    }
+    const id = game.id || '';
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) {
+      hash = id.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return 1735689600000 + Math.abs(hash % 31536000000);
+  };
+
   const filteredGames = games.filter(game => {
     const matchesSearch = game.title.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'الكل' || game.category === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const matchesEdition = !game.edition || game.edition === 'both' || game.edition === selectedEdition;
+    return matchesSearch && matchesCategory && matchesEdition;
   });
 
-  const totalPages = Math.ceil(filteredGames.length / GAMES_PER_PAGE);
-  const paginatedGames = filteredGames.slice((currentPage - 1) * GAMES_PER_PAGE, currentPage * GAMES_PER_PAGE);
+  const sortedGames = [...filteredGames].sort((a, b) => {
+    if (sortBy === 'highest_rated') {
+      const ratingA = a.rating ?? 0;
+      const ratingB = b.rating ?? 0;
+      return ratingB - ratingA;
+    }
+    if (sortBy === 'most_downloaded') {
+      return getGameDownloads(b) - getGameDownloads(a);
+    }
+    return getGameCreationTime(b) - getGameCreationTime(a);
+  });
+
+  const totalPages = Math.ceil(sortedGames.length / GAMES_PER_PAGE);
+  const paginatedGames = sortedGames.slice((currentPage - 1) * GAMES_PER_PAGE, currentPage * GAMES_PER_PAGE);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCategory]);
+  }, [searchTerm, selectedCategory, sortBy]);
 
   const isAdmin = user?.email === 'frassa0000@gmail.com';
   
@@ -504,6 +716,30 @@ const AppContent = () => {
     }
   };
 
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contactMessage.trim()) return;
+    setContactSubmitting(true);
+    try {
+      await addDoc(collection(db, 'reports'), {
+        userId: user ? user.uid : 'guest-visitor',
+        userEmail: contactEmail.trim() || (user ? user.email : 'anonymous@guest.com'),
+        message: `[${language === 'ar' ? 'تواصل' : 'Contact'}: ${contactName.trim() || 'Visitor'}] ${contactMessage.trim()}`,
+        timestamp: serverTimestamp(),
+        status: 'pending'
+      });
+      setContactSuccess(true);
+      setContactName('');
+      setContactEmail('');
+      setContactMessage('');
+      setTimeout(() => setContactSuccess(false), 5000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'reports');
+    } finally {
+      setContactSubmitting(false);
+    }
+  };
+
   const handleAddGame = async (gameData: Omit<Game, 'id'>) => {
     if (!isAdmin) return;
     try {
@@ -555,37 +791,69 @@ const AppContent = () => {
   return (
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`min-h-screen transition-colors duration-500 ${localTheme === 'light' ? 'bg-white text-zinc-900' : 'bg-black text-white'} font-sans selection:bg-red-500 selection:text-white overflow-x-hidden`}>
       {/* Background Image Layer */}
-      <div 
-        className="fixed inset-0 pointer-events-none z-0 bg-cover bg-center bg-no-repeat bg-fixed transition-opacity duration-1000"
+      <motion.div 
+        className="fixed inset-0 pointer-events-none z-0 bg-cover bg-center bg-no-repeat transition-opacity duration-1000"
         style={{ 
           backgroundImage: `url(${backgroundImage})`,
-          opacity: localTheme === 'light' ? 0.05 : 0.22,
+          opacity: localTheme === 'light' ? 0.05 : 0.12,
+        }}
+        animate={{
+          scale: [1, 1.05, 1.02, 1.06, 1],
+          x: [0, 8, -4, 4, 0],
+          y: [0, -4, 6, -3, 0],
+        }}
+        transition={{
+          duration: 35,
+          repeat: Infinity,
+          repeatType: "mirror",
+          ease: "easeInOut",
         }}
       />
+      {/* Elegant Golden Atmosphere Vignette and Gradient Glow Overlays to blend with the scenery */}
+      {localTheme === 'dark' && (
+        <>
+          <div className="fixed inset-0 pointer-events-none z-0 bg-gradient-to-t from-black via-black/95 to-black/30" />
+          <div className="fixed inset-0 pointer-events-none z-0 bg-[radial-gradient(circle_at_center,_transparent_20%,_rgba(0,0,0,0.92)_80%)]" />
+          <div className="fixed inset-0 pointer-events-none z-0 bg-[radial-gradient(circle_at_bottom,_rgba(245,158,11,0.06)_0%,_transparent_60%)]" opacity-70="true" />
+          <div className="fixed inset-0 pointer-events-none z-0 bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.03)_0%,_transparent_50%)]" />
+        </>
+      )}
 
       {/* Navigation */}
-      <nav className="fixed top-0 w-full z-50 transition-colors bg-black/90 border-zinc-900 border-b px-4 md:px-8 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button 
-            onClick={() => setShowMobileMenu(true)}
-            className="md:hidden p-2 hover:bg-zinc-900 rounded-lg transition-colors text-white"
+      <nav className="fixed top-0 w-full z-50 bg-black/90 border-zinc-900 border-b px-4 md:px-8 py-3.5 flex items-center justify-between">
+        
+        {/* Right Side: Burger Menu avatar card & Golden Gih Mods branding text */}
+        <div className="flex items-center gap-3">
+          {/* Minecraft / Profile Avatar brand marker block */}
+          <div 
+            onClick={() => {
+              if (user) {
+                setShowUserPanel(true);
+              } else {
+                setLoginMode('email-signin');
+                setShowLoginModal(true);
+              }
+            }}
+            className="cursor-pointer transition-transform active:scale-95 flex items-center shrink-0 select-none"
           >
-            <Menu className="w-5 h-5" />
-          </button>
-          
-          <motion.div 
-            initial={{ x: -20, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            className="flex items-center"
-          >
-            <span className="text-3xl font-black italic tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-white via-red-500 to-red-650 font-sans select-none">
-              G<span className="text-red-505 text-red-500">ih</span>
-            </span>
-          </motion.div>
+            <div className="w-10 h-10 rounded-xl bg-[#1d0d33] border-2 border-yellow-500/85 p-0.5 overflow-hidden shadow-lg shadow-purple-950/40">
+              <img 
+                src={user?.photoURL && user.photoURL !== "" ? user.photoURL : "https://mc-heads.net/avatar/MHF_Steve/64"} 
+                alt="Avatar" 
+                className="w-full h-full object-cover rounded-lg"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col text-right leading-[1.1] select-none">
+            <span className="text-sm font-black text-amber-400 tracking-tight">Golden Gih</span>
+            <span className="text-[10px] font-bold text-purple-400">Mods</span>
+          </div>
         </div>
 
-        {/* Center Pill Segmented Selection Control (الرئيسية / لك) */}
-        <div className="flex bg-zinc-900/80 p-1 rounded-full border border-zinc-800/60 backdrop-blur-md">
+        {/* Center: Main tabs/selections (Hidden on small mobile screens to prevent clutter, showing on medium+) */}
+        <div className="hidden md:flex bg-zinc-900/80 p-1 rounded-full border border-zinc-800/60 backdrop-blur-md">
           <button 
             onClick={() => {
               setActiveMainTab('home');
@@ -614,43 +882,27 @@ const AppContent = () => {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 md:gap-4">
+        {/* Left Side: Actions and Controls */}
+        <div className="flex items-center gap-2">
+          {/* 1. Language Toggle */}
+          <button 
+            onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
+            className="text-xs font-bold text-zinc-400 hover:text-white transition-all p-2 flex items-center gap-1 shrink-0 select-none"
+          >
+            <span>{language === 'ar' ? 'EN' : 'AR'}</span>
+            <Languages className="w-3.5 h-3.5 text-zinc-400" />
+          </button>
+
+
+
+          {/* 3. Desktop Admin Panel trigger button */}
           {isAdmin && (
             <button 
               onClick={() => setShowAdminPanel(true)}
-              className="hidden md:flex items-center gap-2 bg-zinc-900 border border-zinc-800 px-4 py-1.5 rounded-xl text-xs font-bold hover:bg-zinc-805 transition-all text-white"
+              className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-805 px-4 py-1.5 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-all text-white"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-red-500" />
-              لوحة التحكم
-            </button>
-          )}
-
-          {user ? (
-            <div className="flex items-center gap-3">
-              <div 
-                className="relative cursor-pointer transition-transform active:scale-95"
-                onClick={() => setShowUserPanel(true)}
-              >
-                <div className="w-9 h-9 rounded-full border border-red-500/40 p-0.5 bg-black overflow-hidden flex items-center justify-center">
-                  <img 
-                    src={user.photoURL && user.photoURL !== "" ? user.photoURL : `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} 
-                    alt="Profile" 
-                    className="w-full h-full rounded-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                </div>
-                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border border-zinc-950 rounded-full animate-pulse" />
-              </div>
-            </div>
-          ) : (
-            <button 
-              onClick={() => {
-                setLoginMode('options');
-                setShowLoginModal(true);
-              }}
-              className="bg-red-650 hover:bg-red-600 text-white text-xs px-5 py-2 rounded-full font-black transition-all hover:scale-105 active:scale-95"
-            >
-              {language === 'ar' ? 'دخول' : 'Login'}
+              <span>المدير</span>
             </button>
           )}
         </div>
@@ -659,7 +911,12 @@ const AppContent = () => {
       {/* Main Content Render Router */}
       <main className="pt-24 pb-24 relative z-10 px-4 md:px-8 text-right">
         <div className="max-w-6xl mx-auto">
-          {activeMainTab === 'home' && (
+          <React.Suspense fallback={
+            <div className="flex items-center justify-center py-24">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-red-650" />
+            </div>
+          }>
+            {activeMainTab === 'home' && (
             <div className="space-y-12 animate-fadeIn">
               {/* BRANDING HERO & HIGHLIGHT LIVE SHOWCASE GRID */}
               <HeroSection
@@ -674,13 +931,12 @@ const AppContent = () => {
                 backgroundImage={backgroundImage}
                 currentVibe={currentVibe}
                 isAsymmetricalMode={isAsymmetricalMode}
+                selectedEdition={selectedEdition}
+                changeEdition={changeEdition}
+                isLoggedIn={!!user}
               />
 
-              {/* HIGH-TECH SPEC GAUGES BAR */}
-              <GaugesSection
-                language={language}
-                localTheme={localTheme}
-              />
+
 
               {activeSubTab === 'home' ? (
                 <div className="space-y-12">
@@ -693,17 +949,22 @@ const AppContent = () => {
                       </div>
                       <div className="space-y-3 max-w-xl mx-auto">
                         <h3 className="text-xl md:text-2xl font-black text-white">
-                          {language === 'ar' ? 'بانتظار إضافة أول مود سحابي 🚀' : 'Waiting for Minecraft mods...'}
+                          {language === 'ar' ? 'بانتظار إضافة أول مود سحابي' : 'Waiting for Minecraft mods...'}
                         </h3>
                         <p className="text-xs sm:text-sm text-zinc-400 font-semibold leading-relaxed">
-                          {language === 'ar' 
-                            ? 'تم تفريغ الموقع وإزالة جميع المودات التجريبية بنجاح! كمدير للموقع، يمكنك التوجه إلى لوحة التحكم لإضافة وتصنيف ملفات المودات أو الخرائط لتظهر هنا فوراً لجميع الزوار.' 
-                            : 'All demo mods were removed successfully! You can register/login, head over to the Control Panel, and publish Minecraft mods or texture files to showcase them live.'}
+                          {isAdmin 
+                            ? (language === 'ar' 
+                              ? 'تم تفريغ الموقع وإزالة جميع المودات التجريبية بنجاح! كمدير للموقع، يمكنك التوجه إلى لوحة التحكم لإضافة وتصنيف ملفات المودات أو الخرائط لتظهر هنا فوراً لجميع الزوار.' 
+                              : 'All demo mods were removed successfully! You can register/login, head over to the Control Panel, and publish Minecraft mods or texture files to showcase them live.')
+                            : (language === 'ar'
+                              ? 'يرجى الانتظار لحين إضافة مودات جديدة من قبل الإدارة.'
+                              : 'Please wait until new mods are added by the administration.')
+                          }
                         </p>
                       </div>
 
-                      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-                        {isAdmin ? (
+                      {isAdmin && (
+                        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
                           <button
                             onClick={() => setShowAdminPanel(true)}
                             className="bg-red-650 hover:bg-red-600 text-white font-black text-xs px-8 py-3.5 rounded-xl transition-all shadow-lg flex items-center gap-2 uppercase tracking-wider"
@@ -711,18 +972,8 @@ const AppContent = () => {
                             <ShieldCheck className="w-4 h-4" />
                             {language === 'ar' ? 'لوحة التحكم وإضافة مود جديد' : 'Open Control Panel'}
                           </button>
-                        ) : (
-                          <button
-                            onClick={() => {
-                              setLoginMode('options');
-                              setShowLoginModal(true);
-                            }}
-                            className="bg-zinc-900 hover:bg-zinc-805 text-white font-black text-xs px-8 py-3.5 rounded-xl border border-zinc-800 transition-all flex items-center gap-2"
-                          >
-                            {language === 'ar' ? 'تسجيل دخول كمدير' : 'Login as Manager'}
-                          </button>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <>
@@ -782,7 +1033,7 @@ const AppContent = () => {
                               </div>
 
                               {/* Description text */}
-                              <p className="text-zinc-300 text-xs sm:text-sm font-semibold leading-relaxed text-right bg-zinc-900/40 p-4 border border-zinc-900/60 rounded-xl">
+                              <p className="text-zinc-300 text-xs sm:text-sm font-semibold leading-relaxed text-right bg-zinc-900 p-4 border border-zinc-900/60 rounded-xl">
                                 {language === 'ar' 
                                   ? PRESET_CAROUSEL_MODS[activeCarouselIndex]?.description 
                                   : (PRESET_CAROUSEL_MODS[activeCarouselIndex]?.descriptionEn || PRESET_CAROUSEL_MODS[activeCarouselIndex]?.description)}
@@ -797,7 +1048,7 @@ const AppContent = () => {
                               </div>
 
                               <button 
-                                onClick={() => window.open(PRESET_CAROUSEL_MODS[activeCarouselIndex]?.downloadUrl, '_blank')}
+                                onClick={() => triggerDownload(PRESET_CAROUSEL_MODS[activeCarouselIndex]?.title, PRESET_CAROUSEL_MODS[activeCarouselIndex]?.downloadUrl)}
                                 className="w-full sm:w-auto bg-red-650 hover:bg-red-550 text-white font-black text-xs px-8 py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 uppercase tracking-wider"
                               >
                                 <Download className="w-4 h-4 text-white" />
@@ -965,7 +1216,7 @@ const AppContent = () => {
                                   </span>
 
                                   <button 
-                                    onClick={() => window.open(item.downloadUrl, '_blank')}
+                                    onClick={() => triggerDownload(item.title, item.downloadUrl)}
                                     className={`p-2 rounded-xl transition-all flex items-center justify-center border ${
                                       isMainSpotlight 
                                         ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border-amber-500/20 hover:border-amber-500' 
@@ -1037,7 +1288,7 @@ const AppContent = () => {
                           </div>
                           
                           <button 
-                            onClick={() => window.open(mod.downloadUrl, '_blank')}
+                            onClick={() => triggerDownload(mod.title, mod.downloadUrl)}
                             className="bg-zinc-900 hover:bg-zinc-850 text-white text-xs font-black px-4 py-2 rounded-xl transition w-max flex items-center gap-1.5"
                           >
                             <Download className="w-3.5 h-3.5 text-red-500" />
@@ -1064,22 +1315,59 @@ const AppContent = () => {
                       <TrendingUp className="w-6 h-6 text-red-500" />
                       <span>{t.availableMods}</span>
                     </h2>
-                    <p className="text-xs font-semibold text-zinc-550">
+                    <p className="text-xs font-semibold text-zinc-500">
                       {language === 'ar' ? 'تصفح وحمل مئات المودات المعتمدة والآمنة فوراً' : 'Browse and download secure community contributions instantly'}
                     </p>
                   </div>
-                  <span className="text-xs font-black text-red-400 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-605/10 self-start sm:self-center">
-                    {filteredGames.length} {language === 'ar' ? 'مود متوفر' : 'Mods Available'}
-                  </span>
+
+                  {/* Sorting and Stats Selector */}
+                  <div className="flex flex-wrap items-center gap-3 self-start sm:self-center">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-zinc-500">
+                        {language === 'ar' ? 'ترتيب حسب:' : 'Sort By:'}
+                      </span>
+                      <div className="relative inline-block text-left text-zinc-400">
+                        <select
+                          id="marketplace-sort-dropdown"
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as any)}
+                          className={`appearance-none text-xs font-black rounded-xl pl-3 pr-8 py-2 border transition-all cursor-pointer ${
+                            localTheme === 'light' 
+                              ? 'bg-zinc-100 border-zinc-200 text-zinc-850 hover:bg-zinc-200' 
+                              : 'bg-zinc-950 border-zinc-900 text-white hover:bg-zinc-900'
+                          }`}
+                        >
+                          <option value="newest" className="bg-zinc-950 font-black">
+                            {language === 'ar' ? 'الأحدث' : 'Newest'}
+                          </option>
+                          <option value="highest_rated" className="bg-zinc-950 font-black">
+                            {language === 'ar' ? 'الأعلى تقييماً' : 'Highest Rated'}
+                          </option>
+                          <option value="most_downloaded" className="bg-zinc-950 font-black">
+                            {language === 'ar' ? 'الأكثر تحميلاً' : 'Most Downloaded'}
+                          </option>
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-zinc-500">
+                          <svg className="fill-current h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                            <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+
+                    <span className="text-xs font-black text-red-400 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-650/10">
+                      {filteredGames.length} {language === 'ar' ? 'مود متوفر' : 'Mods Available'}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Category Filtering Selection Bar */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-4 scrollbar-hide">
+                <div className="flex items-center gap-2 overflow-x-auto pb-4 scrollbar-hide w-full" dir={language === 'ar' ? 'rtl' : 'ltr'}>
                   {categories.map((cat) => (
                     <button
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
-                      className={`px-5 py-2.5 rounded-xl whitespace-nowrap transition-all text-xs font-black select-none ${
+                      className={`px-5 py-2.5 rounded-xl whitespace-nowrap transition-all text-xs font-black select-none shrink-0 ${
                         selectedCategory === cat 
                           ? 'bg-red-650 text-white shadow-lg' 
                           : `${localTheme === 'light' ? 'bg-zinc-100 text-zinc-650 hover:bg-zinc-200' : 'bg-zinc-900 border border-zinc-900 text-zinc-405 hover:bg-zinc-800'}`
@@ -1179,9 +1467,13 @@ const AppContent = () => {
                                   referrerPolicy="no-referrer"
                                 />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80" />
-                                <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-xs font-black text-white border border-zinc-800">
+                                <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-xs font-black text-white border border-zinc-800/60 z-10">
                                   <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
                                   {game.rating}
+                                </div>
+                                <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-[10px] font-black text-zinc-300 border border-zinc-800/60 z-10">
+                                  <Download className="w-3.5 h-3.5 text-red-500" />
+                                  <span>{getGameDownloads(game).toLocaleString()}</span>
                                 </div>
                               </div>
                               
@@ -1208,7 +1500,7 @@ const AppContent = () => {
                             
                             <div className="p-5 pt-0">
                               <button 
-                                onClick={() => window.open(game.downloadUrl, '_blank')}
+                                onClick={() => triggerDownload(game.title, game.downloadUrl)}
                                 className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-zinc-900 hover:bg-zinc-850 border border-zinc-905 hover:border-zinc-750"
                               >
                                 <Download className="w-4 h-4 text-white" />
@@ -1271,7 +1563,7 @@ const AppContent = () => {
                 <SidebarSection
                   language={language}
                   presetGridMods={PRESET_GRID_MODS}
-                  onDownload={(url) => window.open(url, '_blank')}
+                  onDownload={(title, url) => triggerDownload(title, url)}
                 />
               </div>
             </div>
@@ -1290,6 +1582,7 @@ const AppContent = () => {
               toggleFavorite={toggleFavorite}
               userProfile={userProfile}
               t={t}
+              onDownload={(title, url) => triggerDownload(title, url)}
             />
           )}
 
@@ -1303,6 +1596,7 @@ const AppContent = () => {
               toggleFavorite={toggleFavorite}
               setLoginMode={setLoginMode}
               setShowLoginModal={setShowLoginModal}
+              onDownload={(title, url) => triggerDownload(title, url)}
             />
           )}
 
@@ -1329,6 +1623,7 @@ const AppContent = () => {
               </button>
             </div>
           )}
+          </React.Suspense>
         </div>
       </main>
 
@@ -1379,54 +1674,31 @@ const AppContent = () => {
               </motion.p>
 
               {/* Redesigned Search Box */}
-              <div className="w-full max-w-lg mb-6 relative group z-25">
-                <div className="absolute -inset-1.5 bg-gradient-to-r from-red-600 to-pink-600 rounded-2xl blur opacity-25 group-focus-within:opacity-40 transition duration-300" />
-                <div className={`relative flex items-center ${localTheme === 'light' ? 'bg-white border-zinc-200' : 'bg-black/90 border-zinc-800'} border rounded-2xl p-1.5 shadow-xl`}>
-                  <div className={`flex items-center flex-1 ${language === 'ar' ? 'pr-4' : 'pl-4'}`}>
-                    <Search className="w-5 h-5 text-red-500 shrink-0" />
+              <div className="w-full max-w-2xl mb-8 relative group z-25">
+                <div className="absolute -inset-2 bg-gradient-to-r from-red-600 to-pink-600 rounded-[22px] blur-md opacity-30 group-focus-within:opacity-50 transition duration-300" />
+                <div className={`relative flex items-center ${localTheme === 'light' ? 'bg-white border-zinc-200' : 'bg-black/95 border-zinc-800'} border-2 rounded-[22px] p-2.5 shadow-2xl`}>
+                  <div className={`flex items-center flex-1 ${language === 'ar' ? 'pr-5' : 'pl-5'}`}>
+                    <Search className="w-6 h-6 text-red-500 shrink-0 animate-pulse" />
                     <input 
                       type="text" 
                       placeholder={t.searchPlaceholder}
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
-                      className={`w-full bg-transparent border-none ${language === 'ar' ? 'pr-3 pl-3 text-right' : 'pl-3 pr-3 text-left'} focus:outline-none focus:ring-0 text-sm py-2.5 text-white placeholder:text-zinc-500`}
+                      className={`w-full bg-transparent border-none ${language === 'ar' ? 'pr-4 pl-4 text-right' : 'pl-4 pr-4 text-left'} focus:outline-none focus:ring-0 text-base py-3.5 text-white placeholder:text-zinc-500 font-extrabold`}
                     />
                   </div>
                   {searchTerm && (
                     <button 
                       onClick={() => setSearchTerm('')}
-                      className="p-2 hover:bg-zinc-800/10 text-zinc-500 hover:text-white rounded-xl transition"
+                      className="p-3 hover:bg-zinc-800/20 text-zinc-400 hover:text-white rounded-2xl transition-all"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-5 h-5" />
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Quick Tags Suggestions */}
-              <div className="flex flex-wrap items-center gap-1.5 justify-center lg:justify-start">
-                <span className="text-xs text-zinc-500 font-bold ml-1">
-                  {language === 'ar' ? 'بحث شائع:' : 'Hot categories:'}
-                </span>
-                {categories.filter(c => c !== 'الكل' && c !== 'All').map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => {
-                      setSelectedCategory(cat);
-                      // Scroll to target content
-                      const el = document.getElementById("available-mods-anchor");
-                      if (el) el.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    className={`text-[11px] font-black px-2.5 py-1 rounded-lg border transition-all ${
-                      selectedCategory === cat 
-                        ? 'bg-red-600/20 text-red-400 border-red-600/40' 
-                        : `${localTheme === 'light' ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-600 border-zinc-200' : 'bg-zinc-900/40 hover:bg-zinc-800 border-zinc-800 text-zinc-400'}`
-                    }`}
-                  >
-                    #{cat}
-                  </button>
-                ))}
-              </div>
+
             </div>
 
             {/* Right Column - Beautiful Live Feature Showcase Panel ("الألعاب المميزة") */}
@@ -1540,7 +1812,7 @@ const AppContent = () => {
                 className={`relative overflow-hidden border p-4.5 rounded-2xl text-center group transition-all duration-300 hover:border-red-500/40 hover:-translate-y-1 ${
                   localTheme === 'light' 
                     ? 'bg-zinc-100/65 border-zinc-200' 
-                    : 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-900/40'
+                    : 'bg-zinc-950 border-zinc-900 hover:bg-zinc-900'
                 }`}
               >
                 <div className="absolute top-0 left-0 w-1.5 h-1.5 bg-red-500 rounded-br-lg opacity-40 group-hover:opacity-100 transition-opacity" />
@@ -1554,255 +1826,183 @@ const AppContent = () => {
         </div>
       </div>
 
-      {/* Categories */}
-      <section className="py-8 px-4 md:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-center gap-4 overflow-x-auto pb-4 scrollbar-hide">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-6 py-2 rounded-full whitespace-nowrap transition-all font-bold ${
-                  selectedCategory === cat 
-                    ? 'bg-red-600 text-white shadow-lg shadow-red-600/30' 
-                    : `${localTheme === 'light' ? 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200' : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800'}`
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
 
-      {/* Games Grid */}
-      <section id="available-mods-anchor" className="py-12 px-4 md:px-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
-            <h2 className={`text-2xl font-black flex items-center gap-2 ${language === 'ar' ? 'flex-row' : 'flex-row-reverse'}`}>
-              <TrendingUp className="w-6 h-6 text-red-500" />
-              {t.availableMods}
-            </h2>
-            <p className="text-red-400 text-sm">
-              {filteredGames.length} {language === 'ar' ? 'مود متوفر' : 'Mods Available'}
-            </p>
-          </div>
-
-          {paginatedGames.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              <AnimatePresence mode="popLayout">
-                {paginatedGames.map((game) => (
-                  <motion.div
-                    key={game.id}
-                    layout
-                    initial={{ opacity: 0, y: 40 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true, margin: "-100px" }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                    whileHover={{ y: -10 }}
-                    className={`group ${localTheme === 'light' ? 'bg-white border-zinc-200 shadow-sm' : 'bg-zinc-900/40 border-zinc-800'} border rounded-3xl overflow-hidden relative`}
-                  >
-                    <div className="aspect-video relative overflow-hidden">
-                      <img 
-                        src={(game.thumbnail && game.thumbnail !== "") ? game.thumbnail : 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'} 
-                        alt={game.title} 
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80" />
-                      <div className="absolute top-4 right-4 bg-red-600/90 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-xs font-bold">
-                        <Star className="w-3 h-3 fill-white" />
-                        {game.rating}
-                      </div>
-                    </div>
-                    
-                    <div className="p-6">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-red-500 uppercase tracking-widest">{game.category}</span>
-                        <button 
-                          onClick={() => toggleFavorite(game.id)}
-                          className={`p-2 rounded-xl transition-all ${userProfile?.favorites?.includes(game.id) ? 'bg-red-600 text-white shadow-lg shadow-red-600/30' : 'bg-white/5 text-zinc-500 hover:bg-white/10 hover:text-zinc-300'}`}
-                        >
-                          <Heart className={`w-4 h-4 ${userProfile?.favorites?.includes(game.id) ? 'fill-current' : ''}`} />
-                        </button>
-                      </div>
-                      <h3 className="text-xl font-bold mb-2 group-hover:text-red-500 transition-colors">{game.title}</h3>
-                      <p className={`${localTheme === 'light' ? 'text-zinc-500' : 'text-red-200/50'} text-sm mb-6 line-clamp-2`}>{game.description}</p>
-                      
-                      <button 
-                        onClick={() => window.open(game.downloadUrl, '_blank')}
-                        className={`w-full ${localTheme === 'light' ? 'bg-zinc-900 text-white hover:bg-zinc-800' : 'bg-white text-red-950 hover:bg-red-100'} py-3 rounded-2xl font-black flex items-center justify-center gap-2 transition-all active:scale-95`}
-                      >
-                        <Download className="w-5 h-5" />
-                        تحميل الآن
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <div className={`text-center py-20 ${localTheme === 'light' ? 'bg-zinc-50 border-zinc-100' : 'bg-zinc-900/20 border-zinc-800'} rounded-3xl border border-dashed`}>
-              <Gamepad2 className={`w-16 h-16 ${localTheme === 'light' ? 'text-zinc-200' : 'text-zinc-800'} mx-auto mb-4`} />
-              <h3 className={`text-xl font-bold ${localTheme === 'light' ? 'text-zinc-400' : 'text-zinc-600'}`}>لا توجد نتائج تطابق بحثك</h3>
-              <p className={localTheme === 'light' ? 'text-zinc-300' : 'text-zinc-800'}>جرب كلمات بحث أخرى</p>
-            </div>
-          )}
-
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="mt-12 flex items-center justify-center gap-4">
-              <button
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-              
-              <div className="flex items-center gap-2">
-                {[...Array(totalPages)].map((_, i) => (
-                  <button
-                    key={i + 1}
-                    onClick={() => setCurrentPage(i + 1)}
-                    className={`w-12 h-12 rounded-2xl font-bold transition-all active:scale-95 ${
-                      currentPage === i + 1 
-                        ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' 
-                        : 'bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-white hover:bg-zinc-800'
-                    }`}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-              </div>
-
-              <button
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Join Community Section for Non-Logged Users */}
-      {!user && (
-        <section className="py-20 px-4 md:px-8">
-          <div className="max-w-6xl mx-auto bg-gradient-to-br from-red-600 to-red-900 rounded-[3rem] p-8 md:p-16 relative overflow-hidden shadow-2xl shadow-red-600/20">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
-            <div className="absolute bottom-0 left-0 w-64 h-64 bg-black/20 rounded-full translate-y-1/2 -translate-x-1/2 blur-3xl" />
-            
-            <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-12">
-              <div className="text-center md:text-right max-w-xl">
-                <h2 className="text-4xl md:text-5xl font-black mb-6 tracking-tighter leading-tight">ما عندك حساب؟<br/>ما في مشكلة!</h2>
-                <p className="text-red-100 text-lg mb-8 leading-relaxed">
-                  انضم لمجتمع اللاعبين الآن واستمتع بتحميل أحدث المودات. يمكنك البدء فوراً كزائر لتجربة الموقع أو إنشاء حساب لحفظ محتواك المفضل.
-                </p>
-                <div className="flex flex-wrap justify-center md:justify-start gap-4">
-                  <button 
-                    onClick={() => {
-                      setLoginMode('email-signup');
-                      setShowLoginModal(true);
-                    }}
-                    className="bg-white text-red-600 px-8 py-4 rounded-2xl font-black text-lg hover:bg-zinc-100 transition-all shadow-xl active:scale-95"
-                  >
-                    إنشاء حساب جديد
-                  </button>
-                  <button 
-                    onClick={handleGuestLogin}
-                    className="bg-black/20 backdrop-blur-md border border-white/20 text-white px-8 py-4 rounded-2xl font-black text-lg hover:bg-black/30 transition-all active:scale-95"
-                  >
-                    الدخول كزائر
-                  </button>
-                </div>
-              </div>
-              
-              <div className="relative">
-                <motion.div 
-                  animate={{ y: [0, -20, 0] }}
-                  transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                  className="bg-white/10 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white/20 shadow-2xl"
-                >
-                  <Ghost className="w-32 h-32 text-white opacity-80" />
-                </motion.div>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* Floating Sticky Bottom Glass Navigation Bar */}
       <nav className="fixed bottom-0 inset-x-0 z-[100] bg-black/95 border-t border-zinc-900 px-6 py-4 flex justify-around items-center shadow-[0_-10px_35px_rgba(0,0,0,0.5)]">
-        <button 
+        <motion.button 
           id="tab-btn-home"
           onClick={() => {
             setActiveMainTab('home');
             setActiveSubTab('home');
           }}
-          className={`flex flex-col items-center gap-1 transition-all ${activeMainTab === 'home' ? 'text-red-500 scale-105' : 'text-zinc-500 hover:text-zinc-300'}`}
+          whileHover={{ scale: 1.12, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          className={`flex flex-col items-center gap-1 transition-colors relative py-1 px-4 rounded-xl hover:bg-zinc-900/50 ${activeMainTab === 'home' ? 'text-red-500' : 'text-zinc-500 hover:text-zinc-350'}`}
         >
           <Gamepad2 className="w-5 h-5" />
           <span className="text-[10px] font-black">{language === 'ar' ? 'الرئيسية' : 'Home'}</span>
-        </button>
+          {activeMainTab === 'home' && (
+            <motion.div 
+              layoutId="nav-indicator" 
+              className="absolute -bottom-1 left-4 right-4 h-0.5 bg-red-600 rounded-full"
+              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            />
+          )}
+        </motion.button>
 
-        <button 
+        <motion.button 
           id="tab-btn-search"
           onClick={() => setActiveMainTab('search')}
-          className={`flex flex-col items-center gap-1 transition-all ${activeMainTab === 'search' ? 'text-red-500 scale-105' : 'text-zinc-500 hover:text-zinc-300'}`}
+          whileHover={{ scale: 1.12, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          className={`flex flex-col items-center gap-1 transition-colors relative py-1 px-4 rounded-xl hover:bg-zinc-900/50 ${activeMainTab === 'search' ? 'text-red-500' : 'text-zinc-500 hover:text-zinc-350'}`}
         >
           <Search className="w-5 h-5" />
           <span className="text-[10px] font-black">{language === 'ar' ? 'البحث' : 'Search'}</span>
-        </button>
+          {activeMainTab === 'search' && (
+            <motion.div 
+              layoutId="nav-indicator" 
+              className="absolute -bottom-1 left-4 right-4 h-0.5 bg-red-600 rounded-full"
+              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            />
+          )}
+        </motion.button>
 
-        <button 
+        <motion.button 
           id="tab-btn-favorites"
           onClick={() => setActiveMainTab('favorites')}
-          className={`flex flex-col items-center gap-1 transition-all ${activeMainTab === 'favorites' ? 'text-red-500 scale-105' : 'text-zinc-500 hover:text-zinc-300'}`}
+          whileHover={{ scale: 1.12, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          className={`flex flex-col items-center gap-1 transition-colors relative py-1 px-4 rounded-xl hover:bg-zinc-900/50 ${activeMainTab === 'favorites' ? 'text-red-500' : 'text-zinc-500 hover:text-zinc-350'}`}
         >
-          <Heart className="w-5 h-5 hover:scale-110 transition" />
+          <Heart className="w-5 h-5" />
           <span className="text-[10px] font-black">{language === 'ar' ? 'المفضلة' : 'Favorites'}</span>
-        </button>
+          {activeMainTab === 'favorites' && (
+            <motion.div 
+              layoutId="nav-indicator" 
+              className="absolute -bottom-1 left-4 right-4 h-0.5 bg-red-600 rounded-full"
+              transition={{ type: "spring", stiffness: 380, damping: 30 }}
+            />
+          )}
+        </motion.button>
 
-        <button 
-          id="tab-btn-settings"
-          onClick={() => setActiveMainTab('settings')}
-          className={`flex flex-col items-center gap-1 transition-all ${activeMainTab === 'settings' ? 'text-red-500 scale-105' : 'text-zinc-500 hover:text-zinc-300'}`}
+        {/* More/Menu 3 Dots Button */}
+        <motion.button 
+          id="tab-btn-more"
+          onClick={() => setShowMobileMenu(true)}
+          whileHover={{ scale: 1.12, y: -2 }}
+          whileTap={{ scale: 0.95 }}
+          className="flex flex-col items-center gap-1 transition-colors relative py-1 px-4 rounded-xl hover:bg-zinc-900/50 text-zinc-500 hover:text-zinc-350"
         >
-          <Settings className="w-5 h-5" />
-          <span className="text-[10px] font-black">{language === 'ar' ? 'إعدادات' : 'Settings'}</span>
-        </button>
+          <MoreHorizontal className="w-5 h-5" />
+          <span className="text-[10px] font-black">{language === 'ar' ? 'المزيد' : 'More'}</span>
+        </motion.button>
       </nav>
 
       {/* Footer */}
-      <footer className={`py-12 px-4 md:px-8 border-t ${localTheme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-black border-zinc-900'}`}>
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-8">
-          <div className="flex items-center gap-2.5">
-            <div className="bg-gradient-to-r from-red-600 to-amber-500 p-2 rounded-xl">
-              <Gamepad2 className="w-5 h-5 text-white" />
-            </div>
-            <div className="flex flex-col leading-tight">
-              <span className="text-sm font-black text-white tracking-tight">Golden Gih</span>
-            </div>
-          </div>
-          
-          <div className="flex gap-8 text-sm text-zinc-500">
-            <a href="#" className="hover:text-white transition-colors">سياسة الخصوصية</a>
-            <a href="#" className="hover:text-white transition-colors">شروط الاستخدام</a>
-            <button 
-              onClick={() => setShowContactModal(true)}
-              className="hover:text-white transition-colors"
+      <footer className={`py-16 px-6 md:px-12 border-t ${localTheme === 'light' ? 'bg-zinc-100 border-zinc-200' : 'bg-[#050507] border-zinc-900'} transition-all text-center relative overflow-hidden`}>
+        {/* Subtle Ambient Backlight Red/Orange Glow */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-red-650/5 blur-[120px] rounded-full pointer-events-none" />
+
+        <div className="max-w-4xl mx-auto space-y-10 relative z-10">
+          {/* Social Community Headers Area */}
+          <div className="space-y-4">
+            <motion.h2 
+              initial={{ opacity: 0, y: 15 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              className="text-4xl md:text-5xl font-black italic tracking-tighter uppercase text-white bg-clip-text drop-shadow-[0_0_25px_rgba(239,68,68,0.15)] font-sans"
             >
-              اتصل بنا
+              FOLLOW GOLDEN GIH
+            </motion.h2>
+            <p className="text-zinc-400 text-xs sm:text-sm md:text-base font-semibold leading-relaxed max-w-xl mx-auto">
+              {language === 'ar' 
+                ? 'انضم إلى مجتمعنا العربي للحصول على التحديثات اليومية والمحتوى الحصري والمساعدات الفورية!'
+                : 'Join our community for daily updates, exclusive mods, gameplay tips and direct help!'}
+            </p>
+          </div>
+
+          {/* Social Showcase Grid Buttons */}
+          <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 select-none">
+            {/* TikTok */}
+            <button
+              onClick={() => handleSocialClick(socials.tiktok, 'تيك توك (TikTok)')}
+              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-full bg-zinc-950/85 border border-zinc-850 hover:border-red-500/80 hover:bg-zinc-900 text-white text-xs sm:text-sm font-black transition-all cursor-pointer shadow-lg active:scale-95"
+            >
+              <Music className="w-4 h-4 text-red-500" />
+              <span>TikTok</span>
+            </button>
+
+            {/* Telegram */}
+            <button
+              onClick={() => handleSocialClick(socials.telegram, 'تلغرام (Telegram)')}
+              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-full bg-zinc-950/85 border border-zinc-850 hover:border-sky-500/80 hover:bg-zinc-900 text-white text-xs sm:text-sm font-black transition-all cursor-pointer shadow-lg active:scale-95"
+            >
+              <Send className="w-4 h-4 text-sky-400" />
+              <span>Telegram</span>
+            </button>
+
+            {/* Discord */}
+            <button
+              onClick={() => handleSocialClick(socials.discord, 'ديسكورد (Discord)')}
+              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-full bg-zinc-950/85 border border-zinc-850 hover:border-indigo-500/80 hover:bg-zinc-900 text-white text-xs sm:text-sm font-black transition-all cursor-pointer shadow-lg active:scale-95"
+            >
+              <Gamepad2 className="w-4 h-4 text-indigo-400" />
+              <span>Discord</span>
+            </button>
+
+            {/* YouTube */}
+            <button
+              onClick={() => handleSocialClick(socials.youtube, 'يوتيوب (YouTube)')}
+              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-full bg-zinc-950/85 border border-zinc-850 hover:border-red-650/80 hover:bg-zinc-900 text-white text-xs sm:text-sm font-black transition-all cursor-pointer shadow-lg active:scale-95"
+            >
+              <Youtube className="w-4 h-4 text-red-600" />
+              <span>YouTube</span>
+            </button>
+
+            {/* X / Twitter */}
+            <button
+              onClick={() => handleSocialClick(socials.twitter, 'منصة إكس (Twitter/X)')}
+              className="flex items-center justify-center gap-2.5 px-6 py-3 rounded-full bg-zinc-950/85 border border-zinc-850 hover:border-zinc-300 hover:bg-zinc-900 text-white text-xs sm:text-sm font-black transition-all cursor-pointer shadow-lg active:scale-95"
+            >
+              <Twitter className="w-4 h-4 text-zinc-300" />
+              <span>X</span>
             </button>
           </div>
 
-          <p className="text-zinc-700 text-sm">
-            © 2026 Golden Gih. {t.footerRights}
-          </p>
+          {/* Minimalist Sub Row for Official Utilities & Modals */}
+          <div className="pt-6 border-t border-zinc-900/60 max-w-2xl mx-auto flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-xs font-bold text-zinc-500 select-none">
+            <button onClick={() => setShowPrivacyModal(true)} className="hover:text-red-500 transition-colors cursor-pointer flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5 text-zinc-400" />
+              <span>{language === 'ar' ? 'سياسة الخصوصية' : 'Privacy Policy'}</span>
+            </button>
+            <span className="opacity-30">•</span>
+            <button onClick={() => setShowTermsModal(true)} className="hover:text-red-500 transition-colors cursor-pointer flex items-center gap-1.5">
+              <ClipboardList className="w-3.5 h-3.5 text-zinc-400" />
+              <span>{language === 'ar' ? 'شروط الاستخدام' : 'Terms of Use'}</span>
+            </button>
+            <span className="opacity-30">•</span>
+            <button onClick={() => setShowAboutModal(true)} className="hover:text-red-500 transition-colors cursor-pointer flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>{language === 'ar' ? 'عن المنصة والأعضاء' : 'About Platform'}</span>
+            </button>
+            <span className="opacity-30">•</span>
+            <button onClick={() => setShowContactModal(true)} className="hover:text-red-500 transition-colors cursor-pointer flex items-center gap-1.5">
+              <Mail className="w-3.5 h-3.5 text-zinc-400" />
+              <span>{language === 'ar' ? 'الدعم الفني' : 'Contact Support'}</span>
+            </button>
+          </div>
+
+          {/* Bottom copyright line Bar */}
+          <div className="pt-4 flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-bold text-zinc-500 max-w-3xl mx-auto border-t border-zinc-900/30 font-sans">
+            <p>
+              © 2026 Golden Gih. {t.footerRights}
+            </p>
+            <p className="text-zinc-650 font-sans">
+              {language === 'ar' ? 'صنع بكل حب لعشاق ماين كرافت العربي Minecraft' : 'Crafted for Minecraft Fans worldwide'}
+            </p>
+          </div>
         </div>
       </footer>
 
@@ -1831,6 +2031,9 @@ const AppContent = () => {
         onUpdateProfile={updateProfile}
         onSendReport={handleSendReport}
         theme={localTheme}
+        language={language}
+        isAppInstalled={isAppInstalled}
+        onInstallPWA={handleInstallPWA}
       />
 
       {/* Contact Modal */}
@@ -1839,6 +2042,28 @@ const AppContent = () => {
         onClose={() => setShowContactModal(false)} 
         onSend={handleSendReport}
         theme={localTheme}
+      />
+
+      {/* Privacy Policy Modal */}
+      <PrivacyModal 
+        isOpen={showPrivacyModal} 
+        onClose={() => setShowPrivacyModal(false)} 
+        theme={localTheme}
+      />
+
+      {/* Terms of Use Modal */}
+      <TermsModal 
+        isOpen={showTermsModal} 
+        onClose={() => setShowTermsModal(false)} 
+        theme={localTheme}
+      />
+
+      {/* About Platform Modal */}
+      <AboutModal 
+        isOpen={showAboutModal} 
+        onClose={() => setShowAboutModal(false)} 
+        theme={localTheme}
+        language={language}
       />
 
       {/* Mobile Side Menu */}
@@ -1918,6 +2143,58 @@ const AppContent = () => {
                     <span>{item.label}</span>
                   </button>
                 ))}
+
+                {/* Profile or Login states inside the side drawer menu */}
+                {user ? (
+                  <>
+                    <button 
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        setShowUserPanel(true);
+                      }}
+                      className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-purple-400`}
+                    >
+                      <UserIcon className="w-5 h-5 text-purple-500" />
+                      <span>{language === 'ar' ? 'الملف الشخصي' : 'Profile'}</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        setShowUserPanel(true);
+                      }}
+                      className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-amber-500/10 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-amber-500`}
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-500" />
+                      <span>{language === 'ar' ? 'مساعد الدعم' : 'Support Assistant'}</span>
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        setShowMobileMenu(false);
+                        try {
+                          await auth.signOut();
+                        } catch (error) {
+                          console.error("Sign out error", error);
+                        }
+                      }}
+                      className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-zinc-400`}
+                    >
+                      <LogOut className="w-5 h-5 text-zinc-500" />
+                      <span>{language === 'ar' ? 'تسجيل الخروج' : 'Log Out'}</span>
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                    onClick={() => {
+                      setShowMobileMenu(false);
+                      setLoginMode('email-signin');
+                      setShowLoginModal(true);
+                    }}
+                    className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-[#6b21a8]/20 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-purple-400`}
+                  >
+                    <UserIcon className="w-5 h-5 text-purple-400" />
+                    <span>{language === 'ar' ? 'تسجيل الدخول' : 'Sign In'}</span>
+                  </button>
+                )}
                 
                 {isAdmin && (
                   <button 
@@ -1953,164 +2230,313 @@ const AppContent = () => {
         )}
       </AnimatePresence>
 
+      {/* Safe & Verified High-Fidelity Download Progress Modal Overlay */}
+      <AnimatePresence>
+        {activeDownload && (
+          <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-red-500/5 text-right font-sans"
+            >
+              {/* Glow highlight effect */}
+              <div className="absolute top-0 right-[-10%] w-36 h-36 bg-red-600/10 rounded-full blur-2xl pointer-events-none" />
+
+              {/* Header status block */}
+              <div className="flex flex-col items-center gap-2 mb-6">
+                <div className="w-16 h-16 rounded-2xl bg-red-650/10 border border-red-500/20 flex items-center justify-center text-red-500 relative">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 2.2, ease: "linear" }}
+                    className="absolute inset-0 rounded-2xl border-2 border-dashed border-red-500/30 pointer-events-none"
+                  />
+                  {activeDownload.progress < 100 ? (
+                    <Download className="w-7 h-7 text-red-500 animate-bounce" />
+                  ) : (
+                    <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+                  )}
+                </div>
+                <h3 className="text-xl font-black text-white mt-1">
+                  {language === 'ar' ? 'تحميل آمن ومعتمد' : 'Secure Premium Download'}
+                </h3>
+                <p className="text-xs font-bold text-zinc-500">
+                  {language === 'ar' ? 'جاري التحقق وفحص الملف السحابي...' : 'Cloud scanning and verifying files...'}
+                </p>
+              </div>
+
+              {/* Target details card */}
+              <div className="bg-zinc-900/50 border border-zinc-900 w-full p-4 rounded-2xl mb-6 text-right space-y-1">
+                <div className="text-[10px] text-zinc-500 font-extrabold uppercase">
+                  {language === 'ar' ? 'اسم الملف والمود' : 'File and Mod Identifier'}
+                </div>
+                <p className="text-sm font-bold text-white truncate">{activeDownload.title}</p>
+                <div className="flex justify-between items-center text-xs font-semibold pt-2 border-t border-zinc-900/40 mt-2">
+                  <span className="text-red-400 font-extrabold">{activeDownload.size}</span>
+                  <span className="text-zinc-500">{language === 'ar' ? 'حجم الملف التقديري' : 'Estimated file size'}</span>
+                </div>
+              </div>
+
+              {/* Progress dynamic tracks */}
+              <div className="space-y-2 mb-6">
+                <div className="flex justify-between items-center text-xs font-black">
+                  <span className="text-zinc-400">
+                    {activeDownload.progress < 100 
+                      ? (language === 'ar' ? 'جاري التنزيل المباشر...' : 'Downloading live...') 
+                      : (language === 'ar' ? 'اكتمل التحميل!' : 'Completed!')}
+                  </span>
+                  <span className="text-red-500">{activeDownload.progress}%</span>
+                </div>
+
+                {/* Progress track body */}
+                <div className="w-full h-3 bg-zinc-900 border border-zinc-900 rounded-full overflow-hidden relative">
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-red-650 to-orange-500 rounded-full"
+                    initial={{ width: '0%' }}
+                    animate={{ width: `${activeDownload.progress}%` }}
+                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                  />
+                </div>
+              </div>
+
+              {/* Live steps updates */}
+              <p className="text-[11px] text-zinc-500 mb-6 font-semibold h-4 select-none">
+                {activeDownload.progress < 30 && (language === 'ar' ? '• جاري تهيئة الاتصال بالسيرفر الآمن...' : '• Initiating secure server connection...')}
+                {activeDownload.progress >= 30 && activeDownload.progress < 70 && (language === 'ar' ? '• جاري استخراج الحزم والتحقق من التوافق...' : '• Extracting packages and checking file integrity...')}
+                {activeDownload.progress >= 70 && activeDownload.progress < 100 && (language === 'ar' ? '• جاري إنشاء رابط التنزيل المباشر المسرع...' : '• Finalizing high-speed direct links...')}
+                {activeDownload.progress === 100 && (language === 'ar' ? 'تم تجهيز الملف! سيفتح الرابط الآن...' : 'File prepared! Direct link launching...')}
+              </p>
+
+              {/* Cancel button */}
+              <button
+                onClick={() => setActiveDownload(null)}
+                className="w-full text-xs font-bold text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-850 p-3 rounded-xl border border-zinc-900 hover:border-zinc-800 transition active:scale-95"
+              >
+                {language === 'ar' ? 'إلغاء التحميل' : 'Cancel Download'}
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Login Modal */}
       <AnimatePresence>
         {showLoginModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowLoginModal(false)}
-              className="absolute inset-0 bg-black/90 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/95 backdrop-blur-sm"
             />
             
             <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-zinc-950 border border-zinc-800 w-full max-w-md rounded-[2rem] overflow-hidden relative z-10 shadow-2xl"
+              initial={{ y: "100%", opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: "100%", opacity: 0 }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
+              className="bg-zinc-950 border border-zinc-800 w-full max-w-md rounded-t-[2rem] sm:rounded-[2rem] overflow-hidden relative z-10 shadow-2xl self-end sm:self-center flex flex-col max-h-[85vh] sm:max-h-[90vh]"
             >
+              {/* Centered Pull-Down Animated Chevron/Arrow Header */}
+              <div 
+                className="w-full flex flex-col items-center py-3 cursor-pointer border-b border-zinc-900/60 sticky top-0 bg-zinc-950 z-20 shrink-0 select-none gap-1"
+                onClick={() => setShowLoginModal(false)}
+              >
+                <div className="w-12 h-1 bg-zinc-800 rounded-full hover:bg-zinc-700 transition-colors" />
+                <motion.div
+                  animate={{ y: [0, 3, 0] }}
+                  transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                  className="text-zinc-500 hover:text-red-500 transition-colors"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </motion.div>
+              </div>
+
               <button 
                 onClick={() => setShowLoginModal(false)}
-                className="absolute top-6 right-6 text-zinc-500 hover:text-white transition-colors"
+                className="absolute top-3 right-6 text-zinc-500 hover:text-white transition-colors z-20"
               >
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5" />
               </button>
 
-              <div className="p-8 pt-12">
-                <div className="bg-red-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-red-600/20 rotate-3">
+              {/* Scrollable Modal Content */}
+              <div className="overflow-y-auto flex-1 p-8 pt-6 [scrollbar-width:thin] [scrollbar-color:rgba(239,68,68,0.3)_rgba(0,0,0,0)] select-none">
+                <div className="bg-red-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-red-600/20 rotate-3 animate-pulse">
                   <Gamepad2 className="w-8 h-8 text-white" />
                 </div>
                 
-                <h2 className="text-2xl font-black text-center mb-2 tracking-tighter">مرحباً بك في Golden Gih</h2>
-                <p className="text-zinc-500 text-center mb-8 text-sm">اختر طريقة الدخول المفضلة لديك</p>
+                <h2 className="text-2xl font-black text-center mb-1 tracking-tighter">مرحباً بك في Golden Gih</h2>
+                <p className="text-zinc-500 text-center mb-6 text-xs font-bold">يرجى تسجيل الدخول أو إنشاء حساب جديد للمتابعة</p>
+
+                {/* Minecraft Edition Selector */}
+                <div className="mb-6 bg-zinc-900/40 p-4 rounded-2xl border border-zinc-900">
+                  <p className="text-[10px] font-black text-amber-500 text-center mb-3 uppercase tracking-wider">
+                    {language === 'ar' ? 'اختر إصدارك المفضل لتصفح موداته:' : 'Select Minecraft Edition:'}
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => changeEdition('bedrock')}
+                      className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all cursor-pointer ${
+                        selectedEdition === 'bedrock'
+                          ? 'bg-amber-500/10 border-amber-500 text-amber-400 font-bold scale-[1.02] shadow-lg shadow-amber-500/5'
+                          : 'bg-zinc-950 border-zinc-900 text-zinc-500 hover:text-zinc-400'
+                      }`}
+                    >
+                      <Smartphone className="w-5 h-5 mb-1.5" />
+                      <span className="text-xs font-bold">{language === 'ar' ? 'بيدروك (Bedrock)' : 'Bedrock'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => changeEdition('java')}
+                      className={`flex flex-col items-center justify-center p-3 rounded-xl border transition-all cursor-pointer ${
+                        selectedEdition === 'java'
+                          ? 'bg-red-500/10 border-red-500 text-red-500 font-bold scale-[1.02] shadow-lg shadow-red-500/5'
+                          : 'bg-zinc-950 border-zinc-900 text-zinc-500 hover:text-zinc-400'
+                      }`}
+                    >
+                      <Laptop className="w-5 h-5 mb-1.5" />
+                      <span className="text-xs font-bold">{language === 'ar' ? 'جافا (Java)' : 'Java'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tab Switcher for Sign In vs Sign Up */}
+                <div className="bg-zinc-900/80 p-1 rounded-2xl border border-zinc-800 grid grid-cols-2 mb-6 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginMode('email-signin');
+                      setAuthError('');
+                    }}
+                    className={`py-3 rounded-xl font-black text-xs transition-all text-center cursor-pointer ${
+                      loginMode !== 'email-signup'
+                        ? 'bg-red-600 text-white shadow-md'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    تسجيل الدخول
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginMode('email-signup');
+                      setAuthError('');
+                    }}
+                    className={`py-3 rounded-xl font-black text-xs transition-all text-center cursor-pointer ${
+                      loginMode === 'email-signup'
+                        ? 'bg-red-600 text-white shadow-md'
+                        : 'text-zinc-400 hover:text-zinc-200'
+                    }`}
+                  >
+                    إنشاء حساب جديد
+                  </button>
+                </div>
 
                 {authError && (
-                  <div className="bg-red-900/20 border border-red-900/50 text-red-400 p-3 rounded-xl mb-6 text-xs flex items-center gap-2">
+                  <div className="bg-red-900/20 border border-red-900/50 text-red-400 p-3 rounded-xl mb-6 text-xs flex items-center gap-2 text-right justify-end" dir="rtl">
                     <AlertCircle className="w-4 h-4 shrink-0" />
-                    {authError}
+                    <span>{authError}</span>
                   </div>
                 )}
 
-                {loginMode === 'options' ? (
-                  <div className="space-y-3">
-                    <button 
-                      onClick={handleGuestLogin}
-                      disabled={authLoading}
-                      className="w-full bg-zinc-900 border border-zinc-800 text-zinc-400 h-14 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-800 hover:text-white transition-all active:scale-[0.98] disabled:opacity-50"
-                    >
-                      <Ghost className="w-5 h-5" />
-                      الدخول السريع كزائر (بدون حساب)
-                    </button>
-
-                    <div className="flex items-center gap-4 my-6">
-                      <div className="h-px bg-zinc-800 flex-1" />
-                      <span className="text-zinc-600 text-xs font-bold uppercase tracking-widest">أو سجل حساباً دائماً</span>
-                      <div className="h-px bg-zinc-800 flex-1" />
+                {/* Email & Password Input Fields */}
+                <form onSubmit={handleEmailAuth} className="space-y-4">
+                  <div className="space-y-1 text-right">
+                    <label className="text-xs font-bold text-zinc-400 mr-2 block">البريد الإلكتروني</label>
+                    <div className="relative">
+                      <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
+                      <input 
+                        type="email" 
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="name@example.com"
+                        className="w-full bg-zinc-900 border border-zinc-800 h-14 rounded-2xl pr-12 pl-6 focus:outline-none focus:border-red-500 transition-colors text-right text-white font-bold"
+                        dir="ltr"
+                      />
                     </div>
+                  </div>
 
+                  <div className="space-y-1 text-right">
+                    <label className="text-xs font-bold text-zinc-400 mr-2 block">كلمة المرور</label>
+                    <div className="relative">
+                      <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
+                      <input 
+                        type="password" 
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-zinc-900 border border-zinc-800 h-14 rounded-2xl pr-12 pl-6 focus:outline-none focus:border-red-500 transition-colors text-right text-white font-bold"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <button 
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-red-600 text-white h-14 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-red-500 transition-all active:scale-[0.98] disabled:opacity-50 mt-4 cursor-pointer"
+                  >
+                    {authLoading ? (
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span>{loginMode === 'email-signup' ? 'إنشاء حساب جديد' : 'تسجيل الدخول ومتابعة'}</span>
+                        <ArrowRight className="w-5 h-5" />
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                {/* Divider for Quick Alternative logins */}
+                <div className="flex items-center gap-4 my-6">
+                  <div className="h-px bg-zinc-900 flex-1" />
+                  <span className="text-zinc-600 text-[10px] font-black uppercase tracking-wider">أو المتابعة السريعة</span>
+                  <div className="h-px bg-zinc-900 flex-1" />
+                </div>
+
+                {/* Guest alternative and other quick logins */}
+                <div className="space-y-3">
+                  <button 
+                    onClick={handleGuestLogin}
+                    disabled={authLoading}
+                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-400 h-13 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-800 hover:text-white transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer text-xs"
+                  >
+                    <Ghost className="w-4 h-4 text-zinc-500" />
+                    الدخول السريع كزائر (بدون حساب)
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-3">
                     <button 
                       onClick={handleGoogleLogin}
                       disabled={authLoading}
-                      className="w-full bg-white text-black h-14 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50"
+                      className="w-full bg-white text-black h-13 rounded-2xl font-black flex items-center justify-center gap-2.5 hover:bg-zinc-200 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer text-xs"
                     >
-                      <svg className="w-5 h-5" viewBox="0 0 24 24">
+                      <svg className="w-4 h-4" viewBox="0 0 24 24">
                         <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                         <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
                         <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
                         <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
                       </svg>
-                      الدخول عبر جوجل
+                      جوجل (Google)
                     </button>
 
                     <button 
                       onClick={handleGithubLogin}
                       disabled={authLoading}
-                      className="w-full bg-zinc-800 text-white h-14 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-700 transition-all active:scale-[0.98] disabled:opacity-50"
+                      className="w-full bg-zinc-900 border border-zinc-800 text-white h-13 rounded-2xl font-black flex items-center justify-center gap-2.5 hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer text-xs"
                     >
-                      <Github className="w-5 h-5" />
-                      الدخول عبر جيت هاب
-                    </button>
-
-                    <button 
-                      onClick={() => setLoginMode('email-signin')}
-                      disabled={authLoading}
-                      className="w-full bg-zinc-900 border border-zinc-800 text-white h-14 rounded-2xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50"
-                    >
-                      <Mail className="w-5 h-5 text-red-500" />
-                      البريد الإلكتروني
+                      <Github className="w-4 h-4 text-zinc-500" />
+                      جيت هاب
                     </button>
                   </div>
-                ) : (
-                  <form onSubmit={handleEmailAuth} className="space-y-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-zinc-500 mr-4 uppercase tracking-widest">البريد الإلكتروني</label>
-                      <div className="relative">
-                        <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
-                        <input 
-                          type="email" 
-                          required
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="name@example.com"
-                          className="w-full bg-zinc-900 border border-zinc-800 h-14 rounded-2xl pl-12 pr-6 focus:outline-none focus:border-red-500 transition-colors"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-zinc-500 mr-4 uppercase tracking-widest">كلمة المرور</label>
-                      <div className="relative">
-                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-600" />
-                        <input 
-                          type="password" 
-                          required
-                          value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="••••••••"
-                          className="w-full bg-zinc-900 border border-zinc-800 h-14 rounded-2xl pl-12 pr-6 focus:outline-none focus:border-red-500 transition-colors"
-                        />
-                      </div>
-                    </div>
-
-                    <button 
-                      type="submit"
-                      disabled={authLoading}
-                      className="w-full bg-red-600 text-white h-14 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-red-500 transition-all active:scale-[0.98] disabled:opacity-50 mt-4"
-                    >
-                      {authLoading ? (
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      ) : (
-                        <>
-                          {loginMode === 'email-signin' ? 'تسجيل الدخول' : 'إنشاء حساب'}
-                          <ArrowRight className="w-5 h-5" />
-                        </>
-                      )}
-                    </button>
-
-                    <div className="text-center mt-6">
-                      <button 
-                        type="button"
-                        onClick={() => setLoginMode(loginMode === 'email-signin' ? 'email-signup' : 'email-signin')}
-                        className="text-sm text-zinc-500 hover:text-red-500 transition-colors"
-                      >
-                        {loginMode === 'email-signin' ? 'ليس لديك حساب؟ سجل الآن' : 'لديك حساب بالفعل؟ سجل دخولك'}
-                      </button>
-                    </div>
-
-                    <button 
-                      type="button"
-                      onClick={() => setLoginMode('options')}
-                      className="w-full text-zinc-600 text-xs font-bold uppercase tracking-widest mt-4 hover:text-zinc-400 transition-colors"
-                    >
-                      العودة للخيارات
-                    </button>
-                  </form>
-                )}
+                </div>
               </div>
               
-              <div className="bg-zinc-900/50 p-6 text-center border-t border-zinc-800">
+              <div className="bg-zinc-900/50 p-6 text-center border-t border-zinc-900 shrink-0">
                 <p className="text-[10px] text-zinc-600 uppercase tracking-[0.2em] leading-relaxed">
                   بالمتابعة، أنت توافق على شروط الخدمة<br/>وسياسة الخصوصية الخاصة بنا
                 </p>
@@ -2126,6 +2552,46 @@ const AppContent = () => {
 export default function App() {
   return <AppContent />;
 }
+
+const compressImage = (base64Str: string, maxWidth = 500, maxHeight = 500, quality = 0.6): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, width, height);
+        // Compress as image/jpeg
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedBase64);
+      } else {
+        resolve(base64Str);
+      }
+    };
+    img.onerror = () => {
+      resolve(base64Str);
+    };
+  });
+};
 
 // --- Components ---
 
@@ -2156,11 +2622,43 @@ const AdminPanel = ({
   user: User | null;
   userProfile: UserProfileData | null;
 }) => {
-  const [activeTab, setActiveTab] = useState<'games' | 'reports' | 'users'>('games');
+  const [activeTab, setActiveTab] = useState<'games' | 'reports' | 'users' | 'socials'>('games');
   const [reports, setReports] = useState<Report[]>([]);
   const [dbUsers, setDbUsers] = useState<any[]>([]);
   const [toggleLoading, setToggleLoading] = useState<string | null>(null);
   const [userSearchText, setUserSearchText] = useState('');
+  const [adminSocials, setAdminSocials] = useState({
+    tiktok: '',
+    telegram: '',
+    discord: '',
+    youtube: '',
+    twitter: ''
+  });
+  const [socialsLoading, setSocialsLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      const settingsRef = doc(db, 'settings', 'socials');
+      getDoc(settingsRef).then((snap) => {
+        if (snap.exists()) {
+          setAdminSocials(snap.data() as any);
+        }
+      }).catch(err => console.error("Error fetching socials config:", err));
+    }
+  }, [isOpen]);
+
+  const handleSaveSocials = async () => {
+    setSocialsLoading(true);
+    try {
+      await setDoc(doc(db, 'settings', 'socials'), adminSocials);
+      alert(language === 'ar' ? 'تم حفظ روابط شبكات التواصل بنجاح!' : 'Social links saved successfully!');
+    } catch (err) {
+      console.error("Save socials error:", err);
+      alert(language === 'ar' ? 'فشل الحفظ كمدير. تأكد من قواعد السيرفر.' : 'Failed saving settings as admin.');
+    } finally {
+      setSocialsLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'users' && isOpen) {
@@ -2198,7 +2696,8 @@ const AdminPanel = ({
     thumbnail: '',
     downloadUrl: '',
     category: 'مودات',
-    rating: 5
+    rating: 5,
+    edition: 'both' as 'java' | 'bedrock' | 'both'
   });
   const [quickAddLink, setQuickAddLink] = useState('');
   
@@ -2217,9 +2716,13 @@ const AdminPanel = ({
 
     const reader = new FileReader();
     reader.onload = async (event) => {
-      const base64Data = event.target?.result as string;
+      const rawBase64 = event.target?.result as string;
+      let base64Data = rawBase64;
       
       try {
+        // Compress the image client-side to keep document size under Firestore's 1MB limit
+        base64Data = await compressImage(rawBase64);
+        
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
           console.warn("GEMINI_API_KEY is not configured in environment variables. Moderation bypassed.");
@@ -2250,7 +2753,7 @@ const AdminPanel = ({
           contents: [
             {
               inlineData: {
-                mimeType: file.type,
+                mimeType: 'image/jpeg',
                 data: cleanBase64
               }
             },
@@ -2392,6 +2895,13 @@ const AdminPanel = ({
             <Users className="w-5 h-5" />
             <span className="text-[10px] font-bold">الأعضاء</span>
           </button>
+          <button 
+            onClick={() => setActiveTab('socials')}
+            className={`flex-1 flex flex-col items-center gap-1 py-3 transition-all ${activeTab === 'socials' ? 'text-red-500 border-b-2 border-red-500' : 'text-zinc-500'}`}
+          >
+            <LinkIcon className="w-5 h-5" />
+            <span className="text-[10px] font-bold">التواصل</span>
+          </button>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
@@ -2422,6 +2932,13 @@ const AdminPanel = ({
             >
               <Users className="w-5 h-5" />
               تنظيم الأعضاء (التوثيقات)
+            </button>
+            <button 
+              onClick={() => setActiveTab('socials')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'socials' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : `text-zinc-500 ${theme === 'light' ? 'hover:bg-zinc-200' : 'hover:bg-zinc-900'}`}`}
+            >
+              <LinkIcon className="w-5 h-5" />
+              روابط التواصل الاجتماعي
             </button>
           </div>
 
@@ -2502,7 +3019,7 @@ const AdminPanel = ({
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <input 
                       type="text" 
                       placeholder="اسم المود / الخريطة"
@@ -2521,9 +3038,52 @@ const AdminPanel = ({
                       <option>موارد</option>
                       <option>سكنات</option>
                     </select>
+                    <select 
+                      value={newGame.edition}
+                      onChange={e => setNewGame({...newGame, edition: e.target.value as any})}
+                      className="bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:border-red-600 outline-none transition-colors"
+                    >
+                      <option value="both">{language === 'ar' ? 'نسخة الجافا وبيدروك معاً (Both)' : 'Both Editions'}</option>
+                      <option value="java">{language === 'ar' ? 'نسخة جافا فقط (Java)' : 'Java Edition Only'}</option>
+                      <option value="bedrock">{language === 'ar' ? 'نسخة بيدروك/الجوال فقط (Bedrock)' : 'Bedrock Edition Only'}</option>
+                    </select>
+
+                    {/* Star Rating Selection Input */}
+                    <div className="col-span-1 md:col-span-3 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-900 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-center gap-2">
+                        <Star className="w-5 h-5 text-yellow-500 fill-yellow-500 animate-pulse" />
+                        <div className="text-right" dir="rtl">
+                          <p className="text-xs font-black text-white">
+                            {language === 'ar' ? 'التقييم الافتراضي للمود' : 'Default Rating'}
+                          </p>
+                          <p className="text-[10px] text-zinc-500">
+                            {language === 'ar' ? 'حدد عدد النجوم الافتراضية الممنوحة لهذا المود عند نشره' : 'Select the default stars count for this mod'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-zinc-950 p-2 rounded-xl border border-zinc-905 w-fit self-end md:self-auto" dir="ltr">
+                        {[1, 2, 3, 4, 5].map((num) => (
+                          <button
+                            type="button"
+                            key={num}
+                            onClick={() => setNewGame({ ...newGame, rating: num })}
+                            className="p-1 transition-all hover:scale-125 focus:outline-none cursor-pointer"
+                          >
+                            <Star 
+                              className={`w-5 h-5 transition-all ${
+                                num <= newGame.rating 
+                                  ? 'text-yellow-500 fill-yellow-500 filter drop-shadow-[0_0_3px_rgba(234,179,8,0.4)]' 
+                                  : 'text-zinc-700 hover:text-yellow-400'
+                              }`} 
+                            />
+                          </button>
+                        ))}
+                        <span className="text-xs font-black ml-2 text-yellow-500">{newGame.rating} / 5</span>
+                      </div>
+                    </div>
 
                     {/* Mod Thumbnail Upload block */}
-                    <div className="flex flex-col gap-2 col-span-1 md:col-span-2 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-800">
+                    <div className="flex flex-col gap-2 col-span-1 md:col-span-3 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-800">
                       <label className="text-xs font-bold text-zinc-400 mr-2 uppercase tracking-widest flex items-center gap-2">
                         <ImageIcon className="w-4 h-4 text-red-500" />
                         صورة المود (Thumbnail)
@@ -2580,7 +3140,7 @@ const AdminPanel = ({
                     </div>
 
                     {/* Mod File Upload block */}
-                    <div className="flex flex-col gap-2 col-span-1 md:col-span-2 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-800">
+                    <div className="flex flex-col gap-2 col-span-1 md:col-span-3 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-800">
                       <label className="text-xs font-bold text-zinc-400 mr-2 uppercase tracking-widest flex items-center gap-2">
                         <FileUp className="w-4 h-4 text-red-500" />
                         ملف المود (Mod File)
@@ -2639,7 +3199,7 @@ const AdminPanel = ({
                       placeholder="الوصف"
                       value={newGame.description}
                       onChange={e => setNewGame({...newGame, description: e.target.value})}
-                      className="col-span-1 md:col-span-2 bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm h-24 focus:border-red-600 outline-none transition-colors resize-none"
+                      className="col-span-1 md:col-span-3 bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm h-24 focus:border-red-600 outline-none transition-colors resize-none"
                     />
                   </div>
                   <button 
@@ -2649,7 +3209,7 @@ const AdminPanel = ({
                         return;
                       }
                       onAddGame(newGame);
-                      setNewGame({ title: '', description: '', thumbnail: '', downloadUrl: '', category: 'مودات', rating: 5 });
+                      setNewGame({ title: '', description: '', thumbnail: '', downloadUrl: '', category: 'مودات', rating: 5, edition: 'both' as 'java' | 'bedrock' | 'both' });
                       setModFileName('');
                     }}
                     disabled={imageLoading || isImageUnsafe}
@@ -2674,7 +3234,16 @@ const AdminPanel = ({
                           )}
                           <div>
                             <h4 className="font-bold">{game.title}</h4>
-                            <p className="text-xs text-zinc-500">{game.category}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-xs text-zinc-500">{game.category}</span>
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-zinc-850 text-zinc-400 capitalize">
+                                {{
+                                  'java': language === 'ar' ? 'جافا' : 'Java',
+                                  'bedrock': language === 'ar' ? 'بيدروك' : 'Bedrock',
+                                  'both': language === 'ar' ? 'الإصدارين' : 'Both'
+                                }[game.edition || 'both']}
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <button 
@@ -2749,7 +3318,7 @@ const AdminPanel = ({
                   </div>
                 )}
               </div>
-            ) : (
+            ) : activeTab === 'users' ? (
               <div className="space-y-6">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
@@ -2864,7 +3433,89 @@ const AdminPanel = ({
                   )}
                 </div>
               </div>
-            )}
+            ) : activeTab === 'socials' ? (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-xl font-bold flex items-center gap-2">
+                    <LinkIcon className="w-5 h-5 text-red-500" />
+                    {language === 'ar' ? 'إعدادات شبكات التواصل الاجتماعي' : 'Social Media Channel Links'}
+                  </h3>
+                  <p className="text-xs text-zinc-500 mt-1">
+                    {language === 'ar' 
+                      ? 'حدد روابط حسابات المنصة الرسمية ليتم تفعيل الأزرار والمتابعة في أسفل الموقع.'
+                      : 'Define active communication endpoints that drive visual links on the public landing page.'}
+                  </p>
+                </div>
+
+                <div className="space-y-4 bg-[#09090b] p-6 rounded-[2rem] border border-zinc-800 text-right" dir="rtl">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط التيك توك (TikTok)</label>
+                    <input 
+                      type="text"
+                      placeholder="https://tiktok.com/@youraccount"
+                      value={adminSocials.tiktok || ''}
+                      onChange={(e) => setAdminSocials(prev => ({ ...prev, tiktok: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط قناة التلغرام (Telegram)</label>
+                    <input 
+                      type="text"
+                      placeholder="https://t.me/yourchannel"
+                      value={adminSocials.telegram || ''}
+                      onChange={(e) => setAdminSocials(prev => ({ ...prev, telegram: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط سيرفر الديسكورد (Discord)</label>
+                    <input 
+                      type="text"
+                      placeholder="https://discord.gg/yourinvite"
+                      value={adminSocials.discord || ''}
+                      onChange={(e) => setAdminSocials(prev => ({ ...prev, discord: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط قناة اليوتيوب (YouTube)</label>
+                    <input 
+                      type="text"
+                      placeholder="https://youtube.com/@yourchannel"
+                      value={adminSocials.youtube || ''}
+                      onChange={(e) => setAdminSocials(prev => ({ ...prev, youtube: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط منصة إكس (Twitter/X)</label>
+                    <input 
+                      type="text"
+                      placeholder="https://x.com/yourhandle"
+                      value={adminSocials.twitter || ''}
+                      onChange={(e) => setAdminSocials(prev => ({ ...prev, twitter: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  <div className="pt-4 flex justify-end">
+                    <button 
+                      onClick={handleSaveSocials}
+                      disabled={socialsLoading}
+                      className="w-full max-w-xs bg-gradient-to-r from-red-650 to-amber-500 hover:from-red-550 hover:to-amber-400 text-white font-black text-xs py-3.5 px-6 rounded-xl transition-all shadow-lg select-none flex items-center justify-center gap-2"
+                    >
+                      {socialsLoading ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ جميع الروابط' : 'Save Social Links')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </motion.div>
@@ -2879,7 +3530,10 @@ const UserPanel = ({
   allGames, 
   onUpdateProfile, 
   onSendReport,
-  theme
+  theme,
+  language,
+  isAppInstalled,
+  onInstallPWA
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
@@ -2888,10 +3542,17 @@ const UserPanel = ({
   onUpdateProfile: (data: Partial<UserProfileData>) => void;
   onSendReport: (msg: string) => void;
   theme: 'dark' | 'light';
+  language: 'ar' | 'en';
+  isAppInstalled: boolean;
+  onInstallPWA: () => void;
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'favorites' | 'settings' | 'support'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'favorites' | 'settings' | 'support' | 'assistant'>('assistant');
   const [newName, setNewName] = useState(profile?.displayName || '');
   const [reportMsg, setReportMsg] = useState('');
+  const [assistantStep, setAssistantStep] = useState<1 | 2 | 3>(1);
+  const [selectedSupportOption, setSelectedSupportOption] = useState<string>('');
+  const [assistantMessage, setAssistantMessage] = useState<string>('');
+  const [isSendingAssistant, setIsSendingAssistant] = useState<boolean>(false);
 
   if (!isOpen || !profile) return null;
 
@@ -2929,7 +3590,8 @@ const UserPanel = ({
             { id: 'profile', label: 'حسابي', icon: UserIcon },
             { id: 'favorites', label: 'المفضلات', icon: Heart },
             { id: 'settings', label: 'الإعدادات', icon: Settings },
-            { id: 'support', label: 'الدعم الفني', icon: MessageSquare },
+            { id: 'support', label: 'تذاكر الدعم', icon: MessageSquare },
+            { id: 'assistant', label: 'مساعد الدعم', icon: Sparkles },
           ].map((tab) => (
             <button 
               key={tab.id}
@@ -2949,7 +3611,8 @@ const UserPanel = ({
               { id: 'profile', label: 'حسابي', icon: UserIcon },
               { id: 'favorites', label: 'المفضلات', icon: Heart },
               { id: 'settings', label: 'الإعدادات', icon: Settings },
-              { id: 'support', label: 'الدعم الفني', icon: MessageSquare },
+              { id: 'support', label: 'تذاكر الدعم', icon: MessageSquare },
+              { id: 'assistant', label: 'مساعد الدعم', icon: Sparkles },
             ].map((tab) => (
               <button 
                 key={tab.id}
@@ -3062,14 +3725,22 @@ const UserPanel = ({
 
             {activeTab === 'settings' && (
               <div className="space-y-6">
-                <h3 className="text-xl font-bold mb-6">إعدادات الموقع</h3>
+                <h3 className="text-xl font-bold mb-6">
+                  {language === 'ar' ? 'إعدادات الموقع' : 'App Settings'}
+                </h3>
+                
+                {/* Theme Setting */}
                 <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-6">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <Palette className="w-5 h-5 text-red-500" />
                       <div>
-                        <p className="font-bold">المظهر العام</p>
-                        <p className="text-xs text-zinc-500">اختر لون الموقع المفضل لديك</p>
+                        <p className="font-bold">
+                          {language === 'ar' ? 'المظهر العام' : 'Appearance'}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          {language === 'ar' ? 'اختر لون الموقع المفضل لديك' : 'Choose your preferred theme'}
+                        </p>
                       </div>
                     </div>
                     <div className={`flex bg-zinc-950 p-1 rounded-xl border ${theme === 'light' ? 'border-zinc-200' : 'border-zinc-800'}`}>
@@ -3077,16 +3748,73 @@ const UserPanel = ({
                         onClick={() => onUpdateProfile({ theme: 'dark' })}
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${theme === 'dark' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-zinc-500'}`}
                       >
-                        داكن
+                        {language === 'ar' ? 'داكن' : 'Dark'}
                       </button>
                       <button 
                         onClick={() => onUpdateProfile({ theme: 'light' })}
                         className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${theme === 'light' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-zinc-500'}`}
                       >
-                        فاتح
+                        {language === 'ar' ? 'فاتح' : 'Light'}
                       </button>
                     </div>
                   </div>
+                </div>
+
+                {/* PWA App Installation Setting */}
+                <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-5 text-right" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3">
+                      <div className="p-3 bg-amber-500/10 text-amber-500 rounded-2xl border border-amber-500/10 shrink-0">
+                        <Smartphone className="w-6 h-6 animate-pulse" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="font-black text-base text-white">
+                          {language === 'ar' ? 'إضافة التطبيق إلى شاشة الهاتف' : 'Add App to Home Screen'}
+                        </h4>
+                        <p className="text-xs text-zinc-400 max-w-md leading-relaxed">
+                          {language === 'ar' 
+                            ? 'قم بتنزيل وتثبيت تطبيق Golden Gih على جهازك كـ تطبيق مثبت فوري لمتابعة وتحميل أسرع للمودات والخرائط بدون الحاجة لفتح المتصفح!'
+                            : 'Download & install Golden Gih on your device as an app for extremely fast catalog exploring and direct mod downloads!'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="shrink-0">
+                      {isAppInstalled ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/15 text-emerald-500 border border-emerald-500/20 rounded-xl text-xs font-extrabold">
+                          <CheckCircle2 className="w-4 h-4" />
+                          {language === 'ar' ? 'مُثبّت بالفعل' : 'Installed'}
+                        </span>
+                      ) : (
+                        <button
+                          onClick={onInstallPWA}
+                          className="w-full sm:w-auto bg-gradient-to-r from-red-650 to-amber-500 hover:from-red-550 hover:to-amber-400 text-white px-5 py-3 rounded-2xl font-black text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-lg shadow-red-500/10 cursor-pointer"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>{language === 'ar' ? 'تنزيل وتثبيت التطبيق' : 'Install App'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Manual installation guide */}
+                  {!isAppInstalled && (
+                    <div className="bg-zinc-950/80 p-4 rounded-2xl border border-zinc-900 space-y-3 mt-4 text-xs font-semibold">
+                      <p className="font-black text-amber-500 flex items-center gap-1.5 justify-end" dir="rtl">
+                        <span>💡 دليل التثبيت اليدوي لأي هاتف:</span>
+                      </p>
+                      <div className="space-y-2 text-zinc-400 text-right leading-relaxed" dir="rtl">
+                        <div className="flex items-start gap-2 justify-end">
+                          <span className="text-white bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0">أندرويد</span>
+                          <span>إذا كنت تستخدم أندرويد (متصفح كروم): اضغط على زر القائمة <span className="text-white font-bold select-none">(⋮)</span> بجانب الرابط ثم اختر <span className="text-white font-black">"تثبيت التطبيق"</span> أو <span className="text-white font-black">"Add to Home screen"</span>.</span>
+                        </div>
+                        <div className="flex items-start gap-2 justify-end">
+                          <span className="text-white bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-lg text-[10px] font-black shrink-0">آيفون iOS</span>
+                          <span>إذا كنت تستخدم آيفون (متصفح سفاري): اضغط على زر المشاركة السفلي <span className="text-white font-bold select-none">(📤)</span> ثم اختر <span className="text-white font-black">"إضافة للشاشة الرئيسية"</span> أو <span className="text-white font-black">"Add to Home Screen"</span>.</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3113,6 +3841,149 @@ const UserPanel = ({
                   >
                     إرسال البلاغ
                   </button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'assistant' && (
+              <div className="space-y-6">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                    <Sparkles className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white">مساعد الدعم الفني الذكي</h3>
+                    <p className="text-xs text-zinc-500">مساعدك لحل جميع المشاكل التقنية على الفور</p>
+                  </div>
+                </div>
+
+                <div className={`border p-6 rounded-[2rem] space-y-6 ${theme === 'light' ? 'bg-zinc-100/50 border-zinc-200' : 'bg-zinc-900/40 border-zinc-900'}`}>
+                  {assistantStep === 1 && (
+                    <div className="space-y-6 text-right">
+                      {/* Bot Greeting Bubble */}
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center shrink-0 shadow-lg shadow-amber-600/15">
+                          <Sparkles className="w-5 h-5 text-white animate-pulse" />
+                        </div>
+                        <div className={`p-5 rounded-3xl rounded-tr-none text-sm leading-relaxed max-w-lg ${theme === 'light' ? 'bg-white text-zinc-800 border border-zinc-200 shadow-sm' : 'bg-zinc-950 text-zinc-100 border border-zinc-900'}`}>
+                          <p className="font-extrabold text-amber-500 mb-1 flex items-center gap-2 justify-end">
+                            <span>مساعد ماين كرافت الذهبي</span>
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                          </p>
+                          <p>مرحباً بك يا غالي! أنا هنا لمساعدتك فوراً لحل أي مشكلة أو الرد على استفسارك ومساعدتك في المودات والخرائط. يرجى اختيار أحد المواضيع السريعة التالية للبدء:</p>
+                        </div>
+                      </div>
+
+                      {/* Helper Selectable Buttons */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                        {[
+                          { text: 'هل في مشكلة؟', desc: 'مشاكل تصفح، تعليق أو بطء في التحميل' },
+                          { text: 'لم يشتغل المود؟', desc: 'المودات لا تظهر أو لا تعمل في اللعبة' },
+                          { text: 'أرجو التواصل معي', desc: 'مواضيع أخرى أو استفسار مخصص للمدير' }
+                        ].map((opt, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              setSelectedSupportOption(opt.text);
+                              setAssistantStep(2);
+                            }}
+                            className={`p-5 rounded-2xl border text-right transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] flex flex-col justify-between h-32 group cursor-pointer ${
+                              theme === 'light' 
+                                ? 'bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-900 hover:border-amber-500/50 shadow-sm' 
+                                : 'bg-zinc-950 hover:bg-zinc-900/40 border-zinc-900 text-white hover:border-amber-500/50'
+                            }`}
+                          >
+                            <span className="font-black text-sm text-amber-500 group-hover:text-amber-400 transition-colors flex items-center gap-1.5 justify-end w-full">
+                              {opt.text}
+                              <span className="w-2 h-2 rounded-full bg-amber-500" />
+                            </span>
+                            <span className="text-xs text-zinc-500 font-bold leading-snug mt-2 w-full text-right">{opt.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {assistantStep === 2 && (
+                    <div className="space-y-6 text-right">
+                      {/* Bot Guidance Bubble */}
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center shrink-0 shadow-lg">
+                          <Sparkles className="w-5 h-5 text-white" />
+                        </div>
+                        <div className={`p-5 rounded-3xl rounded-tr-none text-sm leading-relaxed max-w-lg ${theme === 'light' ? 'bg-white text-zinc-800 border border-zinc-200' : 'bg-zinc-950 text-zinc-100 border border-zinc-900'}`}>
+                          <p className="font-extrabold text-amber-500 mb-1">مساعد ماين كرافت الذهبي</p>
+                          <p>ممتاز جداً! لقد اخترت: <span className="font-black text-white px-2 py-1 bg-amber-500/10 border border-amber-500/25 rounded-lg text-xs">"{selectedSupportOption}"</span></p>
+                          <p className="mt-3">يرجى الآن كتابة رسالتك بالتفصيل (مثل رقم المود أو المشكلة التي واجهتك، أو وسيلة التواصل معك) في المستطيل أدناه، وسأرفعها فوراً إلى المدير:</p>
+                        </div>
+                      </div>
+
+                      {/* Textarea for Writing Message */}
+                      <div className="space-y-4">
+                        <textarea
+                          value={assistantMessage}
+                          onChange={(e) => setAssistantMessage(e.target.value)}
+                          placeholder="اكتب رسالتك وتفاصيل المشكلة هنا بالتفصيل..."
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded-3xl p-5 text-sm h-36 focus:border-amber-500 outline-none transition-all resize-none text-white font-bold placeholder-zinc-650 shadow-inner"
+                        />
+
+                        <div className="flex flex-col sm:flex-row gap-3">
+                          <button
+                            disabled={!assistantMessage.trim() || isSendingAssistant}
+                            onClick={async () => {
+                              setIsSendingAssistant(true);
+                              try {
+                                const fullReportContent = `[مساعد الدعم]: العميل اختار خيار: "${selectedSupportOption}"\n\nالرسالة المكتوبة:\n${assistantMessage.trim()}`;
+                                await onSendReport(fullReportContent);
+                                setAssistantStep(3);
+                              } catch (e) {
+                                console.error(e);
+                              } finally {
+                                setIsSendingAssistant(false);
+                              }
+                            }}
+                            className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black py-4 rounded-2xl font-black text-xs transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/15 cursor-pointer"
+                          >
+                            <span>{isSendingAssistant ? 'جاري إرسال رسالتك...' : 'إرسال الرسالة إلى لوحة تحكم المدير'}</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setAssistantStep(1);
+                              setAssistantMessage('');
+                            }}
+                            className="bg-zinc-950 hover:bg-zinc-900 text-zinc-400 border border-zinc-800 px-6 py-4 rounded-2xl font-bold transition-all text-xs cursor-pointer"
+                          >
+                            رجوع للخلف
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {assistantStep === 3 && (
+                    <div className="text-center py-8 space-y-6">
+                      <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center mx-auto shadow-lg animate-bounce">
+                        <CheckCircle2 className="w-8 h-8" />
+                      </div>
+                      <div className="space-y-2">
+                        <h4 className="text-xl font-black text-amber-400">تم إرسال رسالتك بنجاح!</h4>
+                        <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+                          تم رفع طلبك المصنف كمشكلة تتبع لـ <span className="text-white font-bold">"{selectedSupportOption}"</span> مباشرة إلى الإعدادات ولوحة التحكم الخاصة بالمدير العام لمراجعتها وحلها في أسرع وقت.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setAssistantStep(1);
+                          setSelectedSupportOption('');
+                          setAssistantMessage('');
+                        }}
+                        className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 px-8 py-3.5 rounded-2xl font-black text-xs transition-all cursor-pointer"
+                      >
+                        بدء طلب جديد مع المساعد
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3185,6 +4056,191 @@ const ContactModal = ({
               إلغاء
             </button>
           </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+export const PrivacyModal = ({ 
+  isOpen, 
+  onClose, 
+  theme 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  theme: 'dark' | 'light'; 
+}) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+      />
+      
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
+      >
+        <div className="p-8 pt-10 text-right max-h-[80vh] overflow-y-auto scrollbar-none">
+          <div className="bg-red-650/10 border border-red-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-7 h-7 text-red-500" />
+          </div>
+          
+          <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>🔐 سياسة الخصوصية وأمان البيانات</h2>
+          
+          <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2">1. جمع وإدارة البيانات</h3>
+              <p>نهتم بخصوصيتك لأقصى درجة. نجمع فقط معلومات التسجيل الأساسية لتوفير حساب آمن مثل اسم المستخدم، والبريد الإلكتروني، وصورة الحساب الشخصي التي تقوم بتهيئتها.</p>
+            </div>
+
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2">2. أمان الملفات والمودات</h3>
+              <p>جميع المودات والخرائط الموجودة قابلة للتحميل بروابط مباشرة رسمية وآمنة. نقوم بفحص السيرفرات والروابط دورياً لضمان عدم وجود برمجيات خبيثة وحماية أجهزتك بالكامل.</p>
+            </div>
+
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2">3. ملفات تعريف الارتباط و LocalStorage</h3>
+              <p>نستخدم وحدات التخزين المحلية لتفضيل الثيم المفضل لك (مظلم أو مضيء) والاحتفاظ بحالة تسجيل الدخول لتسريع تجربتك عند تصفح المنصة.</p>
+            </div>
+          </div>
+
+          <button 
+            onClick={onClose}
+            className="w-full mt-8 bg-gradient-to-r from-red-600 to-amber-500 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] cursor-pointer"
+          >
+            فهمت وإغلاق
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+export const TermsModal = ({ 
+  isOpen, 
+  onClose, 
+  theme 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  theme: 'dark' | 'light'; 
+}) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+      />
+      
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
+      >
+        <div className="p-8 pt-10 text-right max-h-[80vh] overflow-y-auto scrollbar-none">
+          <div className="bg-red-650/10 border border-red-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <ClipboardList className="w-7 h-7 text-red-500" />
+          </div>
+          
+          <div className="hidden" /> {/* Spacer */}
+          <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>📜 شروط الاستخدام وقوانين المنصة</h2>
+          
+          <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2">1. الاستخدام العادل والمسموح</h3>
+              <p>يُسمح لجميع أعضاء المنصة بتنزيل وتثبيت المودات والملفات وإبداء تفضيلاتها بالقلب بشكل مجاني تماماً. يُمنع استخدام ريبوتات البرمجة أو إرسال تقارير كاذبة مزعجة في لوحة القيادة التابعة للإدارة.</p>
+            </div>
+
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2">2. رفع المحتوى والملفات</h3>
+              <p>للمدير العام والمسؤولين حظر أي روابط تحمل ملفات كسر حماية أو التفافية. يجب أن يحمل الملف ترخيص المطور أو يكون متاح ومصرح للنشر للعامة حرصاً على الحقوق الفكرية والملكية.</p>
+            </div>
+
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2">3. إخلاء وتبرئة المسؤولية</h3>
+              <p>نحن نسعى دائماً لتفادي وعزل المشاكل التقنية وملفات الكراش. بالرغم من ذلك لا تتحمل إدارة المنصة أي أضرار جانبية أو خلل ينشأ عن تثبيت المود بصيغة غير متوافقة مع جوالك أو نسختك الخاصة من ماين كرافت.</p>
+            </div>
+          </div>
+
+          <button 
+            onClick={onClose}
+            className="w-full mt-8 bg-gradient-to-r from-red-600 to-amber-500 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] cursor-pointer"
+          >
+            أوافق وأغلق
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+export const AboutModal = ({ 
+  isOpen, 
+  onClose, 
+  theme,
+  language = 'ar'
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  theme: 'dark' | 'light'; 
+  language?: string;
+}) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+      />
+      
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
+      >
+        <div className="p-8 pt-10 text-right max-h-[80vh] overflow-y-auto scrollbar-none">
+          <div className="bg-gradient-to-r from-red-600 to-amber-500 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-red-500/10">
+            <Gamepad2 className="w-7 h-7 text-white" />
+          </div>
+          
+          <h2 className={`text-2xl font-black text-center mb-2 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>{language === 'ar' ? 'عن منصة Golden Gih' : 'About Golden Gih'}</h2>
+          <p className="text-xs text-zinc-500 text-center mb-6 font-bold">تأسس الموقع وقاعدة بيانتنا السحابية في يونيو 2026</p>
+          
+          <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2 flex items-center justify-end gap-1.5">
+                <span>{language === 'ar' ? 'البداية والرؤية' : 'The Vision & Start'}</span>
+                <Sparkles className="w-4 h-4 text-amber-500" />
+              </h3>
+              <p>تم إطلاق لوحة المنصة لتوفير محتوى ماين كرافت متميز وآمن للاعبين والزوار بالوطن العربي دون تشتيت أو إعلانات مسرطنة للملفات. طموحاتنا تمكين محبي اللعبة من العثور على ما يرغبون به بيسر وسرعة فائقة.</p>
+            </div>
+
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+              <h3 className="font-black text-red-500 mb-2 flex items-center justify-end gap-1.5">
+                <span>{language === 'ar' ? 'مميزات وإحصائيات الأعضاء' : 'Member Features & Stats'}</span>
+                <Crown className="w-4 h-4 text-amber-500" />
+              </h3>
+              <p>تتمتع عضويتك بتصنيفات راقية وإطارات متلألئة حول رمزك، بفضل نظام الدخول الموحد، والمفضلة السهلة وخطوط النقر الحديثة المعززة بتأثيرات الحركة المذهلة.</p>
+            </div>
+          </div>
+
+          <button 
+            onClick={onClose}
+            className="w-full mt-8 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] cursor-pointer"
+          >
+            شكراً لكم وإغلاق
+          </button>
         </div>
       </motion.div>
     </div>

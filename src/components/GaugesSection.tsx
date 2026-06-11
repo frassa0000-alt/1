@@ -2,41 +2,68 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Smartphone, Flame, TrendingUp, CheckCircle2 } from 'lucide-react';
 
+interface Game {
+  id: string;
+  title: string;
+  description: string;
+  thumbnail: string;
+  downloadUrl: string;
+  category: string;
+  rating: number;
+}
+
 interface GaugesSectionProps {
   language: 'ar' | 'en';
   localTheme: 'dark' | 'light';
+  games: Game[];
 }
 
 export const GaugesSection: React.FC<GaugesSectionProps> = ({
   language,
   localTheme,
+  games,
 }) => {
+  // Calculate real, accurate, non-simulated numbers from the database
+  const modsCount = games.filter(
+    (g) => g.category === 'مودات' || g.category === 'Mods'
+  ).length;
+
+  const mapsCount = games.filter(
+    (g) => g.category === 'خرائط' || g.category === 'Maps'
+  ).length;
+
+  const otherCount = games.filter(
+    (g) =>
+      !['مودات', 'Mods', 'خرائط', 'Maps'].includes(g.category)
+  ).length;
+
+  // Real overall calculated average rating of the uploaded components
+  const averageRating =
+    games.length > 0
+      ? (
+          games.reduce((acc, g) => acc + (g.rating || 5), 0) / games.length
+        ).toFixed(1)
+      : '5.0';
+
   const stats = [
     { 
       icon: Smartphone, 
-      label: language === 'ar' ? 'مودات هواتف حصرية' : 'Exclusive Mobile Mods', 
-      value: '500+',
+      label: language === 'ar' ? 'المودات النشطة بقاعدة البيانات' : 'Active Mods in Database', 
+      value: `${modsCount}`,
       themeColor: 'border-red-500/20 hover:border-red-500 hover:shadow-red-500/5 text-red-500',
       bgColor: 'bg-zinc-950',
     },
     { 
       icon: Flame, 
-      label: language === 'ar' ? 'خرائط تريند مشتعلة' : 'Trending Maps', 
-      value: '120+',
+      label: language === 'ar' ? 'الخرائط الجاهزة للتحميل' : 'Maps Ready to Load', 
+      value: `${mapsCount}`,
       themeColor: 'border-yellow-500/20 hover:border-yellow-500 hover:shadow-yellow-500/5 text-yellow-500',
       bgColor: 'bg-zinc-950',
     },
     { 
-      icon: TrendingUp, 
-      label: language === 'ar' ? 'تحميلات نشطة بالثانية' : 'Active Downloads', 
-      value: '10K+',
-      themeColor: 'border-teal-500/20 hover:border-teal-500 hover:shadow-teal-500/5 text-teal-400',
-      bgColor: 'bg-zinc-950',
-    },
-    { 
       icon: CheckCircle2, 
-      label: language === 'ar' ? 'درجة أمان قصوى' : 'Certified Secure', 
-      value: '100%',
+      label: language === 'ar' ? 'متوسط تقييم المودات' : 'Average Mod Rating', 
+      value: `${averageRating} / 5.0`,
       themeColor: 'border-purple-500/20 hover:border-purple-500 hover:shadow-purple-500/5 text-purple-400',
       bgColor: 'bg-zinc-950',
     },
@@ -44,7 +71,7 @@ export const GaugesSection: React.FC<GaugesSectionProps> = ({
 
   return (
     <section className="pt-6 pb-2 border-t border-dashed border-zinc-900 w-full relative">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {stats.map((stat, i) => (
           <motion.div 
             key={i}

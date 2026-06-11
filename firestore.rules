@@ -59,6 +59,7 @@ service cloud.firestore {
              (data.get('role', 'user') in ['user', 'admin']) &&
              (data.get('verified', false) is bool) &&
              (data.get('theme', 'dark') in ['dark', 'light']) &&
+             (data.get('minecraftEdition', 'bedrock') in ['bedrock', 'java']) &&
              (data.get('favorites', []) is list && data.get('favorites', []).size() <= 1000);
     }
 
@@ -95,7 +96,7 @@ service cloud.firestore {
                       (incoming().createdAt == request.time || incoming().createdAt == null);
       allow update: if isSignedIn() && isOwner(userId) && (
         incoming().diff(existing()).affectedKeys().size() == 0 ||
-        incoming().diff(existing()).affectedKeys().hasOnly(['lastLogin', 'displayName', 'photoURL', 'favorites', 'theme'])
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastLogin', 'displayName', 'photoURL', 'favorites', 'theme', 'minecraftEdition'])
       ) || isAdmin();
     }
 
@@ -109,6 +110,11 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if isSignedIn() && isValidReport(incoming()) && (incoming().userId == request.auth.uid || !incoming().keys().contains('userId'));
       allow update, delete: if isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /test/connection {

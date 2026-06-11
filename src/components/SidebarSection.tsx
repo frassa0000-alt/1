@@ -12,10 +12,10 @@ interface SidebarSectionProps {
     downloadUrl: string;
     rating: number;
   }>;
-  onDownload: (url: string) => void;
+  onDownload: (title: string, url: string) => void;
 }
 
-export const SidebarSection: React.FC<SidebarSectionProps> = ({
+export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
   language,
   presetGridMods,
   onDownload,
@@ -176,7 +176,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = ({
                 </h4>
                 
                 <button 
-                  onClick={() => onDownload(mod.downloadUrl)}
+                  onClick={() => onDownload(mod.title, mod.downloadUrl)}
                   className="text-zinc-300 hover:text-white text-[9px] font-black flex items-center gap-1 transition-all bg-black/60 border border-zinc-900 hover:border-zinc-800 px-2.5 py-1 rounded-lg"
                 >
                   <Download className="w-3 h-3 text-red-500" />
@@ -202,4 +202,4 @@ export const SidebarSection: React.FC<SidebarSectionProps> = ({
       </div>
     </div>
   );
-};
+});

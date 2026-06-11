@@ -13,9 +13,10 @@ interface SearchTabProps {
   toggleFavorite: (id: string) => void;
   userProfile: any;
   t: any;
+  onDownload: (title: string, url: string) => void;
 }
 
-export const SearchTab: React.FC<SearchTabProps> = ({
+export const SearchTab: React.FC<SearchTabProps> = React.memo(({
   language,
   searchTerm,
   setSearchTerm,
@@ -26,6 +27,7 @@ export const SearchTab: React.FC<SearchTabProps> = ({
   toggleFavorite,
   userProfile,
   t,
+  onDownload,
 }) => {
   return (
     <div className="space-y-6 mt-4">
@@ -179,7 +181,7 @@ export const SearchTab: React.FC<SearchTabProps> = ({
                   </div>
                   <div className="p-5 pt-0">
                     <button 
-                      onClick={() => window.open(game.downloadUrl, '_blank')}
+                      onClick={() => onDownload(game.title, game.downloadUrl)}
                       className={`w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${cardVibe.btnBg}`}
                     >
                       <Download className="w-4 h-4 text-white" />
@@ -200,4 +202,4 @@ export const SearchTab: React.FC<SearchTabProps> = ({
       </div>
     </div>
   );
-};
+});
