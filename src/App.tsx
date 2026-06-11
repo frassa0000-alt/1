@@ -2435,10 +2435,69 @@ const AppContent = () => {
                 </div>
 
                 {authError && (
-                  <div className="bg-red-900/20 border border-red-900/50 text-red-400 p-3 rounded-xl mb-6 text-xs flex items-center gap-2 text-right justify-end" dir="rtl">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>{authError}</span>
-                  </div>
+                  authError.toLowerCase().includes('unauthorized-domain') || authError.toLowerCase().includes('unauthorized domain') ? (
+                    <div className="bg-amber-950/35 border border-amber-800/40 text-amber-200 p-5 rounded-2xl mb-6 text-xs space-y-3" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                      <div className="flex items-start gap-2.5">
+                        <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5 animate-bounce" />
+                        <div>
+                          <h4 className="font-black text-white text-sm mb-1">
+                            {language === 'ar' ? '⚠️ نطاق غير مصرح به في Firebase' : '⚠️ Firebase Unauthorized Domain'}
+                          </h4>
+                          <p className="text-[11px] leading-relaxed text-zinc-300">
+                            {language === 'ar' 
+                              ? 'يرجى تسجيل الرابط الحالي للموقع في لوحة تحكم Firebase Authentication حتى تتمكن من تسجيل الدخول.' 
+                              : 'Please authorize this application domain in your Firebase Authentication settings to enable login.'}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="bg-zinc-950/80 p-3.5 rounded-xl border border-zinc-900 space-y-2 mt-2">
+                        <p className="text-[10px] font-black text-amber-500 uppercase tracking-wider">
+                          {language === 'ar' ? '📱 الرابط المطلوب إضافته:' : '📱 Domain to copy:'}
+                        </p>
+                        <div className="flex items-center justify-between bg-zinc-900 px-3 py-2 rounded-lg border border-zinc-800 text-zinc-300 font-mono text-[10px] break-all">
+                          <code className="select-all font-bold transition-colors text-white">{window.location.hostname}</code>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(window.location.hostname);
+                              alert(language === 'ar' ? 'تم نسخ النقاط بنجاح!' : 'Domain copied successfully!');
+                            }} 
+                            className="text-[10px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-bold px-2 py-0.5 rounded transition-colors ml-2 cursor-pointer shrink-0 animate-pulse"
+                          >
+                            {language === 'ar' ? 'نسخ' : 'Copy'}
+                          </button>
+                        </div>
+                        <ol className="list-decimal list-inside space-y-1 text-zinc-400 text-[10px] leading-relaxed pl-1 pt-1 text-right" dir="rtl">
+                          <li>
+                            {language === 'ar' 
+                              ? 'اذهب إلى لوحة تحكم Firebase Console.' 
+                              : 'Go to your Firebase Console.'}
+                          </li>
+                          <li>
+                            {language === 'ar' 
+                              ? 'اختر مشروعك ثم انتقل إلى قسم Authentication.' 
+                              : 'Select your project and go to Authentication.'}
+                          </li>
+                          <li>
+                            {language === 'ar' 
+                              ? 'من التبويب Settings (الإعدادات) ثم Authorized Domains (النطاقات المصرح بها).' 
+                              : 'Navigate to Settings (or Authorized Domains) tab.'}
+                          </li>
+                          <li>
+                            {language === 'ar' 
+                              ? 'اضغط على "Add domain" وألصق النطاق المنسوخ أعلاه.' 
+                              : 'Click "Add domain" and paste the copied domain.'}
+                          </li>
+                        </ol>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-red-900/20 border border-red-900/50 text-red-400 p-3 rounded-xl mb-6 text-xs flex items-center gap-2 text-right justify-end" dir="rtl">
+                      <AlertCircle className="w-4 h-4 shrink-0" />
+                      <span>{authError}</span>
+                    </div>
+                  )
                 )}
 
                 {/* Email & Password Input Fields */}
