@@ -24,6 +24,7 @@ interface HeroSectionProps {
   selectedEdition?: 'java' | 'bedrock';
   changeEdition?: (edition: 'java' | 'bedrock') => void;
   isLoggedIn?: boolean;
+  onImageClick?: () => void;
 }
 
 export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
@@ -41,24 +42,39 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
   selectedEdition = 'bedrock',
   changeEdition,
   isLoggedIn = false,
+  onImageClick,
 }) => {
   const isRTL = language === 'ar';
 
   return (
     <section className="flex flex-col items-center justify-center text-center py-8 relative z-10 w-full max-w-4xl mx-auto px-4">
-      {/* 1. Purple Capsule Upper Badge - "أكثر من 200+ مود متاح للتحميل" */}
+      {/* 1.5 Beautiful Centered Thumbnail of the Hero Game/Rogue Art */}
       <motion.div
-        initial={{ opacity: 0, y: -15 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="mb-6"
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.15, duration: 0.6 }}
+        className="mb-6 relative group cursor-pointer"
+        onClick={() => onImageClick?.()}
+        title={isRTL ? 'اضغط للمطالبة بمكافأتك اليومية (50 نقطة)!' : 'Click to claim your daily reward (50 points)!'}
       >
-        <span className="inline-flex items-center gap-2 text-xs font-semibold px-5 py-2.5 rounded-full bg-amber-950/40 border border-amber-500/20 text-amber-400 shadow-lg select-none">
-          <Flame className="w-4 h-4 text-amber-500 animate-pulse" />
-          <span className="tracking-tight font-bold">
-            {isRTL ? 'أكثر من 200+ مود متاح للتحميل' : 'Over 200+ Mods Available for Download'}
+        <div className="absolute -inset-1.5 bg-gradient-to-r from-red-650 via-rose-600 to-amber-500 rounded-[2.2rem] blur opacity-40 group-hover:opacity-75 transition duration-500 animate-pulse" />
+        <div className="relative w-44 h-44 sm:w-52 sm:h-52 rounded-[2rem] overflow-hidden border-2 border-red-500/25 shadow-2xl bg-zinc-950 hover:border-amber-500/50 transition-colors duration-300">
+          <img 
+            src="/src/assets/images/minecraft_hero_1781259712815.jpg" 
+            alt="Minecraft Adventure Portal" 
+            className="w-full h-full object-cover transform scale-100 group-hover:scale-110 transition-transform duration-700"
+            referrerPolicy="no-referrer"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+          <span className="absolute bottom-3 right-3 left-3 text-[10px] font-black tracking-widest uppercase bg-rose-650 text-white px-2.5 py-1 rounded-lg text-center shadow-md animate-pulse">
+            Golden
           </span>
-        </span>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+            <span className="bg-amber-500/90 text-black text-xs font-black px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-1">
+              {isRTL ? '🎁 احصل على نقاط!' : '🎁 Claim Points!'}
+            </span>
+          </div>
+        </div>
       </motion.div>
 
       {/* 2. Main High-Contrast Centered Title */}

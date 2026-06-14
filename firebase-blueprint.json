@@ -14,7 +14,9 @@
         "minecraftEdition": { "type": "string", "enum": ["java", "bedrock"] },
         "role": { "type": "string", "enum": ["user", "admin"] },
         "createdAt": { "type": "string", "format": "date-time" },
-        "lastLogin": { "type": "string", "format": "date-time" }
+        "lastLogin": { "type": "string", "format": "date-time" },
+        "points": { "type": "number" },
+        "purchased": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["uid", "email"]
     },
@@ -29,7 +31,10 @@
         "thumbnail": { "type": "string", "format": "uri" },
         "downloadUrl": { "type": "string", "format": "uri" },
         "category": { "type": "string" },
-        "rating": { "type": "number" }
+        "rating": { "type": "number" },
+        "isPaid": { "type": "boolean" },
+        "price": { "type": "string" },
+        "pointsPrice": { "type": "number" }
       },
       "required": ["title", "downloadUrl"]
     },
@@ -57,6 +62,19 @@
         "youtube": { "type": "string" },
         "twitter": { "type": "string" }
       }
+    },
+    "Ad": {
+      "title": "Ad",
+      "description": "Interactive advertisements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "link": { "type": "string", "format": "uri" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["imageUrl", "link"]
     }
   },
   "firestore": {
@@ -75,6 +93,10 @@
     "/settings/{docId}": {
       "schema": "SiteSettings",
       "description": "Site global features"
+    },
+    "/ads/{adId}": {
+      "schema": "Ad",
+      "description": "Interactive advertising campaigns"
     }
   }
 }

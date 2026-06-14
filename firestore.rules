@@ -60,6 +60,8 @@ service cloud.firestore {
              (data.get('verified', false) is bool) &&
              (data.get('theme', 'dark') in ['dark', 'light']) &&
              (data.get('minecraftEdition', 'bedrock') in ['bedrock', 'java']) &&
+             (data.get('points', 0) is number) &&
+             (data.get('purchased', []) is list && data.get('purchased', []).size() <= 1000) &&
              (data.get('favorites', []) is list && data.get('favorites', []).size() <= 1000);
     }
 
@@ -68,9 +70,13 @@ service cloud.firestore {
              data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
              data.downloadUrl is string && data.downloadUrl.size() < 2000 &&
              (data.get('description', '') is string && data.get('description', '').size() < 5000) &&
-             (data.get('thumbnail', '') is string && data.get('thumbnail', '').size() < 2000) &&
+             (data.get('thumbnail', '') is string && data.get('thumbnail', '').size() < 1000000) &&
              (data.get('category', '') is string && data.get('category', '').size() < 100) &&
-             (data.get('rating', 0) is number);
+             (data.get('rating', 0) is number) &&
+             (data.get('edition', 'both') in ['java', 'bedrock', 'both']) &&
+             (data.get('isPaid', false) is bool) &&
+             (data.get('price', '') is string && data.get('price', '').size() < 500) &&
+             (data.get('pointsPrice', 0) is number);
     }
 
     function isValidReport(data) {
@@ -81,10 +87,18 @@ service cloud.firestore {
              (data.get('status', 'pending') in ['pending', 'resolved']);
     }
 
+    function isValidAd(data) {
+      return data.keys().hasAll(['imageUrl', 'link']) &&
+             data.imageUrl is string && data.imageUrl.size() < 1000000 &&
+             data.link is string && data.link.size() < 2000 &&
+             (data.get('title', '') is string && data.get('title', '').size() < 500);
+    }
+
     function isAdmin() {
       return isSignedIn() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         request.auth.token.email == "frassa0000@gmail.com");
+        (request.auth.token.email == "frassa0000@gmail.com" ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     // Rules
@@ -96,7 +110,7 @@ service cloud.firestore {
                       (incoming().createdAt == request.time || incoming().createdAt == null);
       allow update: if isSignedIn() && isOwner(userId) && (
         incoming().diff(existing()).affectedKeys().size() == 0 ||
-        incoming().diff(existing()).affectedKeys().hasOnly(['lastLogin', 'displayName', 'photoURL', 'favorites', 'theme', 'minecraftEdition'])
+        incoming().diff(existing()).affectedKeys().hasOnly(['lastLogin', 'displayName', 'photoURL', 'favorites', 'theme', 'minecraftEdition', 'points', 'purchased'])
       ) || isAdmin();
     }
 
@@ -115,6 +129,12 @@ service cloud.firestore {
     match /settings/{docId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    match /ads/{adId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidAd(incoming());
+      allow delete: if isAdmin();
     }
 
     match /test/connection {

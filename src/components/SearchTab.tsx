@@ -1,6 +1,39 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Search, X, Gamepad2, Download, Star, Heart } from 'lucide-react';
+import { Search, X, Gamepad2, Download, Star, Heart, Coins, Crown } from 'lucide-react';
+
+const calculatePointsPrice = (priceStr: string | undefined): number => {
+  if (!priceStr) return 100;
+  const cleaned = priceStr.trim();
+  const minecoinMatch = cleaned.match(/(\d+)\s*Minecoins/i) || cleaned.match(/(\d+)\s*كوينز/i) || cleaned.match(/(\d+)\s*عملة/i);
+  if (minecoinMatch) {
+    const coins = parseInt(minecoinMatch[1], 10);
+    if (coins <= 80) return 160;
+    if (coins <= 160) return 200;
+    if (coins <= 310) return 300;
+    if (coins <= 490) return 400;
+    if (coins <= 830) return 500;
+    if (coins <= 990) return 600;
+    return Math.round(coins * 1.5);
+  }
+  const usdMatch = cleaned.match(/\$\s*([0-9.]+)/) || cleaned.match(/([0-9.]+)\s*\$/);
+  if (usdMatch) {
+    const usd = parseFloat(usdMatch[1]);
+    if (usd <= 0.99) return 160;
+    if (usd <= 1.99) return 200;
+    if (usd <= 2.99) return 300;
+    if (usd <= 4.99) return 505;
+    return Math.round(usd * 100);
+  }
+  const numMatch = cleaned.match(/(\d+)/);
+  if (numMatch) {
+    const val = parseInt(numMatch[1], 10);
+    if (val <= 80) return 160;
+    if (val <= 160) return 200;
+    return Math.round(val * 1.5);
+  }
+  return 200;
+};
 
 interface SearchTabProps {
   language: 'ar' | 'en';
@@ -13,7 +46,9 @@ interface SearchTabProps {
   toggleFavorite: (id: string) => void;
   userProfile: any;
   t: any;
-  onDownload: (title: string, url: string) => void;
+  onDownload: (title: string, url: string, description?: string, category?: string, id?: string) => void;
+  onBuyWithPoints?: (game: any) => void;
+  isGamePurchased?: (id: string) => boolean;
 }
 
 export const SearchTab: React.FC<SearchTabProps> = React.memo(({
@@ -28,6 +63,8 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
   userProfile,
   t,
   onDownload,
+  onBuyWithPoints,
+  isGamePurchased,
 }) => {
   return (
     <div className="space-y-6 mt-4">
@@ -160,11 +197,24 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                       {game.rating}
                     </div>
                   </div>
+                  
                   <div className="p-5 space-y-3 text-right">
                     <div className="flex items-center justify-between">
-                      <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${cardVibe.badgeBg}`}>
-                        {game.category}
-                      </span>
+                      {game.isPaid ? (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-amber-500 bg-amber-500/10 border-amber-500/20 flex items-center gap-1">
+                            <Coins className="w-3.5 h-3.5 inline text-amber-400 animate-pulse" />
+                            {game.price || (language === 'ar' ? 'متميز' : 'Premium')}
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-emerald-400 bg-emerald-500/10 border-emerald-500/20 flex items-center gap-1">
+                            {language === 'ar' ? 'الشراء عبر النقط' : 'Buy with points'}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${cardVibe.badgeBg}`}>
+                          {game.category}
+                        </span>
+                      )}
                       <button 
                         onClick={() => toggleFavorite(game.id)}
                         className={`p-2 rounded-xl transition-all ${
@@ -179,14 +229,36 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                     <h4 className={`text-lg font-black leading-tight text-white transition-colors uppercase group-hover:${cardVibe.activeColor}`}>{game.title}</h4>
                     <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2">{game.description}</p>
                   </div>
-                  <div className="p-5 pt-0">
-                    <button 
-                      onClick={() => onDownload(game.title, game.downloadUrl)}
-                      className={`w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${cardVibe.btnBg}`}
-                    >
-                      <Download className="w-4 h-4 text-white" />
-                      {language === 'ar' ? 'تحميل مجاني الآن' : 'Instantly Install'}
-                    </button>
+                  <div className="p-5 pt-0 flex flex-col gap-2">
+                    {game.isPaid ? (
+                      isGamePurchased?.(game.id) ? (
+                        <button 
+                          onClick={() => onDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
+                          className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-500/20 cursor-pointer shadow-emerald-950/15"
+                        >
+                          <Crown className="w-4 h-4 text-white" />
+                          {language === 'ar' ? 'تحميل المود (مفتوح ✅)' : 'Download Mod (Unlocked ✅)'}
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={() => onBuyWithPoints?.(game)}
+                          className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-555 hover:to-yellow-500 border border-amber-550/20 cursor-pointer shadow-amber-950/15 animate-pulse"
+                        >
+                          <Coins className="w-4 h-4 text-white" />
+                          {language === 'ar' 
+                            ? `شراء بـ ${game.pointsPrice || calculatePointsPrice(game.price)} نقطة` 
+                            : `Buy for ${game.pointsPrice || calculatePointsPrice(game.price)} Points`}
+                        </button>
+                      )
+                    ) : (
+                      <button 
+                        onClick={() => onDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
+                        className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-red-650 to-amber-600 hover:from-red-600 hover:to-amber-500 border border-red-500/10 cursor-pointer shadow-red-950/20"
+                      >
+                        <Download className="w-4 h-4 text-white" />
+                        {language === 'ar' ? 'تحميل المود' : 'Download Mod'}
+                      </button>
+                    )}
                   </div>
                 </motion.div>
               );
@@ -195,8 +267,14 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
         ) : (
           <div className="text-center py-20 bg-zinc-950 border border-zinc-900 rounded-2xl border-dashed">
             <Gamepad2 className="w-12 h-12 text-zinc-800 mx-auto mb-4" />
-            <p className="text-sm font-bold text-zinc-400">لم نعثر على أي مودات متوافقة مع كلمتك المدخلة</p>
-            <p className="text-xs text-zinc-650 mt-1">جرب كلمات دلالية أبسط مثل "درع"، "سيارات"، "أسلحة"</p>
+            <p className="text-sm font-bold text-zinc-400">
+              {language === 'ar' ? 'لم نعثر على أي مودات متوافقة مع كلمتك المدخلة' : 'No compatible content found matching your search term'}
+            </p>
+            <p className="text-xs text-zinc-650 mt-1">
+              {language === 'ar' 
+                ? 'جرب كلمات دلالية أبسط مثل "درع"، "سيارات"، "أسلحة"' 
+                : 'Try simpler keywords such as "armor", "cars", "weapons"'}
+            </p>
           </div>
         )}
       </div>

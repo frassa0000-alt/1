@@ -11,8 +11,9 @@ interface SidebarSectionProps {
     thumbnail: string;
     downloadUrl: string;
     rating: number;
+    description?: string;
   }>;
-  onDownload: (title: string, url: string) => void;
+  onDownload: (title: string, url: string, description?: string, category?: string) => void;
 }
 
 export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
@@ -76,7 +77,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
               className="bg-black/40 border border-zinc-900 rounded-xl p-3 mb-4 flex gap-3 text-right items-center select-none"
             >
               <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-zinc-900 bg-zinc-950 relative">
-                <img src={rolledMod.thumbnail} alt="" className="w-full h-full object-cover" />
+                <img src={rolledMod.thumbnail || null} alt="" className="w-full h-full object-cover" />
                 {isSpinning && (
                   <div className="absolute inset-0 bg-zinc-950/80 flex items-center justify-center">
                     <Sparkles className="w-5 h-5 text-yellow-400 animate-spin" />
@@ -156,7 +157,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
             >
               <div className="w-18 h-14 shrink-0 relative rounded-xl overflow-hidden bg-zinc-900 border border-zinc-900 shadow-inner">
                 <img 
-                  src={mod.thumbnail} 
+                  src={mod.thumbnail || null} 
                   alt={mod.title}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
@@ -176,7 +177,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
                 </h4>
                 
                 <button 
-                  onClick={() => onDownload(mod.title, mod.downloadUrl)}
+                  onClick={() => onDownload(mod.title, mod.downloadUrl, mod.description, mod.category)}
                   className="text-zinc-300 hover:text-white text-[9px] font-black flex items-center gap-1 transition-all bg-black/60 border border-zinc-900 hover:border-zinc-800 px-2.5 py-1 rounded-lg"
                 >
                   <Download className="w-3 h-3 text-red-500" />

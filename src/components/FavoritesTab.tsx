@@ -1,6 +1,39 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Heart, Download, Lock, Star } from 'lucide-react';
+import { Heart, Download, Lock, Star, Coins, Crown } from 'lucide-react';
+
+const calculatePointsPrice = (priceStr: string | undefined): number => {
+  if (!priceStr) return 100;
+  const cleaned = priceStr.trim();
+  const minecoinMatch = cleaned.match(/(\d+)\s*Minecoins/i) || cleaned.match(/(\d+)\s*كوينز/i) || cleaned.match(/(\d+)\s*عملة/i);
+  if (minecoinMatch) {
+    const coins = parseInt(minecoinMatch[1], 10);
+    if (coins <= 80) return 160;
+    if (coins <= 160) return 200;
+    if (coins <= 310) return 300;
+    if (coins <= 490) return 400;
+    if (coins <= 830) return 500;
+    if (coins <= 990) return 600;
+    return Math.round(coins * 1.5);
+  }
+  const usdMatch = cleaned.match(/\$\s*([0-9.]+)/) || cleaned.match(/([0-9.]+)\s*\$/);
+  if (usdMatch) {
+    const usd = parseFloat(usdMatch[1]);
+    if (usd <= 0.99) return 160;
+    if (usd <= 1.99) return 200;
+    if (usd <= 2.99) return 300;
+    if (usd <= 4.99) return 505;
+    return Math.round(usd * 100);
+  }
+  const numMatch = cleaned.match(/(\d+)/);
+  if (numMatch) {
+    const val = parseInt(numMatch[1], 10);
+    if (val <= 80) return 160;
+    if (val <= 160) return 200;
+    return Math.round(val * 1.5);
+  }
+  return 200;
+};
 
 interface FavoritesTabProps {
   language: 'ar' | 'en';
@@ -10,7 +43,9 @@ interface FavoritesTabProps {
   toggleFavorite: (id: string) => void;
   setLoginMode: (mode: 'options' | 'email-signin' | 'email-signup') => void;
   setShowLoginModal: (show: boolean) => void;
-  onDownload: (title: string, url: string) => void;
+  onDownload: (title: string, url: string, description?: string, category?: string, id?: string) => void;
+  onBuyWithPoints?: (game: any) => void;
+  isGamePurchased?: (id: string) => boolean;
 }
 
 export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
@@ -22,6 +57,8 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
   setLoginMode,
   setShowLoginModal,
   onDownload,
+  onBuyWithPoints,
+  isGamePurchased,
 }) => {
   return (
     <div className="space-y-6 mt-4">
@@ -112,9 +149,21 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
                     </div>
                     <div className="p-5 space-y-3 text-right">
                       <div className="flex items-center justify-between">
-                        <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${cardVibe.badgeBg}`}>
-                          {game.category}
-                        </span>
+                        {game.isPaid ? (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-amber-500 bg-amber-500/10 border-amber-500/20 flex items-center gap-1">
+                              <Coins className="w-3.5 h-3.5 inline text-amber-400 animate-pulse" />
+                              {game.price || (language === 'ar' ? 'متميز' : 'Premium')}
+                            </span>
+                            <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-emerald-400 bg-emerald-500/10 border-emerald-500/20 flex items-center gap-1">
+                              {language === 'ar' ? 'الشراء عبر النقط' : 'Buy with points'}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className={`text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border ${cardVibe.badgeBg}`}>
+                            {game.category}
+                          </span>
+                        )}
                         <button 
                         onClick={() => toggleFavorite(game.id)}
                         className={`p-2 rounded-xl transition-all bg-zinc-900 text-zinc-500 hover:text-white hover:bg-zinc-850`}
@@ -125,14 +174,36 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
                       <h4 className={`text-lg font-black leading-tight text-white transition-colors uppercase group-hover:${cardVibe.activeColor}`}>{game.title}</h4>
                       <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2">{game.description}</p>
                     </div>
-                    <div className="p-5 pt-0">
-                      <button 
-                        onClick={() => onDownload(game.title, game.downloadUrl)}
-                        className={`w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md ${cardVibe.btnBg}`}
-                      >
-                        <Download className="w-4 h-4 text-white" />
-                        {language === 'ar' ? 'تحميل مجاني الآن' : 'Instantly Install'}
-                      </button>
+                    <div className="p-5 pt-0 flex flex-col gap-2">
+                      {game.isPaid ? (
+                        isGamePurchased?.(game.id) ? (
+                          <button 
+                            onClick={() => onDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
+                            className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-500/20 cursor-pointer shadow-emerald-950/15"
+                          >
+                            <Crown className="w-4 h-4 text-white" />
+                            {language === 'ar' ? 'تحميل المود (مفتوح ✅)' : 'Download Mod (Unlocked ✅)'}
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => onBuyWithPoints?.(game)}
+                            className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-555 hover:to-yellow-500 border border-amber-550/20 cursor-pointer shadow-amber-950/15 animate-pulse"
+                          >
+                            <Coins className="w-4 h-4 text-white" />
+                            {language === 'ar' 
+                              ? `شراء بـ ${game.pointsPrice || calculatePointsPrice(game.price)} نقطة` 
+                              : `Buy for ${game.pointsPrice || calculatePointsPrice(game.price)} Points`}
+                          </button>
+                        )
+                      ) : (
+                        <button 
+                          onClick={() => onDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
+                          className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-red-650 to-amber-600 hover:from-red-600 hover:to-amber-500 border border-red-500/10 cursor-pointer shadow-rose-950/20"
+                        >
+                          <Download className="w-4 h-4 text-white" />
+                          {language === 'ar' ? 'تحميل المود' : 'Download Mod'}
+                        </button>
+                      )}
                     </div>
                   </motion.div>
                 );
@@ -141,8 +212,14 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
           ) : (
             <div className="text-center py-24 bg-zinc-950 border border-zinc-900 rounded-2xl border-dashed">
               <Heart className="w-16 h-16 text-zinc-900 mx-auto mb-4 opacity-50" />
-              <h3 className="text-base font-black text-zinc-400">قائمة المفضلات فارغة حالياً</h3>
-              <p className="text-xs text-zinc-650 mt-1">تصفح الرئيسية وانقر على أيقونة القلب على المودات التي تنال إعجابك لحفظها هنا</p>
+              <h3 className="text-base font-black text-zinc-400">
+                {language === 'ar' ? 'قائمة المفضلات فارغة حالياً' : 'Your Favorites list is currently empty'}
+              </h3>
+              <p className="text-xs text-zinc-650 mt-1">
+                {language === 'ar' 
+                  ? 'تصفح الرئيسية وانقر على أيقونة القلب على المودات التي تنال إعجابك لحفظها هنا' 
+                  : 'Browse the catalog and click the heart icon on mods you like to bookmark them here'}
+              </p>
             </div>
           )}
         </div>
@@ -150,9 +227,13 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
         <div className="bg-zinc-950 border border-zinc-900 p-8 sm:p-12 rounded-2xl text-center space-y-6 max-w-xl mx-auto">
           <Lock className="w-16 h-16 text-red-500 mx-auto animate-pulse" />
           <div className="space-y-2">
-            <h3 className="text-xl font-black text-white">يتطلب تسجيل الدخول</h3>
+            <h3 className="text-xl font-black text-white">
+              {language === 'ar' ? 'يتطلب تسجيل الدخول' : 'Sign In Required'}
+            </h3>
             <p className="text-zinc-400 text-xs sm:text-sm leading-relaxed">
-              يرجى تسجيل الدخول أو الدخول كزائر لتفعيل ميزة الحفظ السحابي وحقيبة المفضلات لحفظ ومتابعة موداتك المفضلة باستمرار.
+              {language === 'ar' 
+                ? 'يرجى تسجيل الدخول أو الدخول كزائر لتفعيل ميزة الحفظ السحابي وحقيبة المفضلات لحفظ ومتابعة موداتك المفضلة باستمرار.' 
+                : 'Please sign in or enter as a guest to enable automated bookmarks syncing across your devices.'}
             </p>
           </div>
           <button
@@ -160,9 +241,9 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
               setLoginMode('options');
               setShowLoginModal(true);
             }}
-            className="bg-red-650 hover:bg-red-600 text-white font-black text-xs px-8 py-3.5 rounded-xl transition-all shadow-lg select-none hover:scale-105"
+            className="bg-red-650 hover:bg-red-600 text-white font-black text-xs px-8 py-3.5 rounded-xl transition-all shadow-lg select-none hover:scale-105 animate-pulse"
           >
-            تسجيل الدخول الآن
+            {language === 'ar' ? 'تسجيل الدخول الآن' : 'Sign In Now'}
           </button>
         </div>
       )}

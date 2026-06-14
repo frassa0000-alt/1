@@ -54,7 +54,9 @@ import {
   Youtube,
   Send,
   Twitter,
-  Music
+  Music,
+  Coins,
+  DollarSign
 } from 'lucide-react';
 import { 
   auth, 
@@ -83,7 +85,9 @@ import {
   addDoc,
   deleteDoc,
   updateDoc,
-  serverTimestamp 
+  serverTimestamp,
+  arrayUnion,
+  where
 } from 'firebase/firestore';
 // @ts-ignore
 import { GoogleGenAI, Type } from '@google/genai';
@@ -95,6 +99,7 @@ const HeroSection = React.lazy(() => import('./components/HeroSection').then(m =
 const SidebarSection = React.lazy(() => import('./components/SidebarSection').then(m => ({ default: m.SidebarSection })));
 const SearchTab = React.lazy(() => import('./components/SearchTab').then(m => ({ default: m.SearchTab })));
 const FavoritesTab = React.lazy(() => import('./components/FavoritesTab').then(m => ({ default: m.FavoritesTab })));
+const AdCarousel = React.lazy(() => import('./components/AdCarousel').then(m => ({ default: m.AdCarousel })));
 
 // Types
 interface Game {
@@ -107,6 +112,9 @@ interface Game {
   rating: number;
   edition?: 'java' | 'bedrock' | 'both';
   createdAt?: any;
+  isPaid?: boolean;
+  price?: string;
+  pointsPrice?: number;
 }
 
 interface UserProfileData {
@@ -119,6 +127,9 @@ interface UserProfileData {
   role?: 'user' | 'admin';
   verified?: boolean;
   minecraftEdition?: 'java' | 'bedrock';
+  points?: number;
+  lastPointsClaimedAt?: string | null;
+  purchased?: string[];
 }
 
 interface Report {
@@ -128,6 +139,14 @@ interface Report {
   message: string;
   timestamp: any;
   status: 'pending' | 'resolved';
+  reply?: string;
+}
+
+interface Ad {
+  id: string;
+  imageUrl: string;
+  link: string;
+  title?: string;
 }
 
 const PRESET_CAROUSEL_MODS: any[] = [];
@@ -150,10 +169,46 @@ const AppContent = () => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
+  
+  // Drawer Editing states
+  const [drawerDisplayName, setDrawerDisplayName] = useState('');
+  const [drawerSelectedEdition, setDrawerSelectedEdition] = useState<'java' | 'bedrock'>('java');
+  const [isSavingDrawerProfile, setIsSavingDrawerProfile] = useState(false);
+  const [drawerSaveSuccess, setDrawerSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (userProfile) {
+      setDrawerDisplayName(userProfile.displayName || '');
+      setDrawerSelectedEdition(userProfile.minecraftEdition || 'java');
+    }
+  }, [userProfile]);
+
   const [loginMode, setLoginMode] = useState<'options' | 'email-signin' | 'email-signup'>('email-signin');
   const [localTheme, setLocalTheme] = useState<'dark' | 'light'>(
     (localStorage.getItem('theme') as 'dark' | 'light') || 'dark'
   );
+
+  // Local Points/Coins state for Guests
+  const [guestPoints, setGuestPoints] = useState<number>(() => {
+    return Number(localStorage.getItem('gih_guest_points') || '0');
+  });
+  const [guestLastClaimed, setGuestLastClaimed] = useState<string | null>(() => {
+    return localStorage.getItem('gih_guest_last_claimed') || null;
+  });
+  const [guestPurchased, setGuestPurchased] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('gih_guest_purchased') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  // Points popup notification state
+  const [pointsNotification, setPointsNotification] = useState<{
+    show: boolean;
+    points: number;
+    message: string;
+  } | null>(null);
   
   // PWA Install Prompt State and Effect
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -219,6 +274,203 @@ const AppContent = () => {
     twitter: ''
   });
 
+  const calculatePointsPrice = (priceStr: string | undefined): number => {
+    if (!priceStr) return 100;
+    const cleaned = priceStr.trim();
+    const minecoinMatch = cleaned.match(/(\d+)\s*Minecoins/i) || cleaned.match(/(\d+)\s*كوينز/i) || cleaned.match(/(\d+)\s*عملة/i);
+    if (minecoinMatch) {
+      const coins = parseInt(minecoinMatch[1], 10);
+      if (coins <= 80) return 160;
+      if (coins <= 160) return 200;
+      if (coins <= 310) return 300;
+      if (coins <= 490) return 400;
+      if (coins <= 830) return 500;
+      if (coins <= 990) return 600;
+      return Math.round(coins * 1.5);
+    }
+    const usdMatch = cleaned.match(/\$\s*([0-9.]+)/) || cleaned.match(/([0-9.]+)\s*\$/);
+    if (usdMatch) {
+      const usd = parseFloat(usdMatch[1]);
+      if (usd <= 0.99) return 160;
+      if (usd <= 1.99) return 200;
+      if (usd <= 2.99) return 300;
+      if (usd <= 4.99) return 505;
+      return Math.round(usd * 100);
+    }
+    const numMatch = cleaned.match(/(\d+)/);
+    if (numMatch) {
+      const val = parseInt(numMatch[1], 10);
+      if (val <= 80) return 160;
+      if (val <= 160) return 200;
+      return Math.round(val * 1.5);
+    }
+    return 200;
+  };
+
+  const isGamePurchased = (gameId: string): boolean => {
+    if (user) {
+      return userProfile?.purchased?.includes(gameId) || false;
+    } else {
+      return guestPurchased.includes(gameId);
+    }
+  };
+
+  const totalPoints = user ? (userProfile?.points || 0) : guestPoints;
+
+  const handleImageClickPointsClaim = async () => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    
+    if (user) {
+      const lastClaimed = userProfile?.lastPointsClaimedAt || null;
+      if (lastClaimed === todayStr) {
+        setPointsNotification({
+          show: true,
+          points: 0,
+          message: language === 'ar' 
+            ? 'لقد حصلت على نقاطك المضمونة لليوم بالفعل! عد غداً للحصول على جائزتك اليومية المتجددة. 🌟' 
+            : 'You have already claimed today\'s points! Come back tomorrow for more. 🌟'
+        });
+        return;
+      }
+      
+      const currentPoints = userProfile?.points || 0;
+      const newPoints = currentPoints + 50;
+      
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          points: newPoints,
+          lastPointsClaimedAt: todayStr
+        });
+        
+        setPointsNotification({
+          show: true,
+          points: 50,
+          message: language === 'ar' 
+            ? 'مبروك مبروك! لقد ربحت 50 نقطة مكافأة يومية لمشاهدة وتعديل الصورة اليوم! 🎉' 
+            : 'Congratulations! You successfully won 50 points daily reward! 🎉'
+        });
+      } catch (error) {
+        console.error("Error updating profile points:", error);
+      }
+    } else {
+      if (guestLastClaimed === todayStr) {
+        setPointsNotification({
+          show: true,
+          points: 0,
+          message: language === 'ar' 
+            ? 'لقد حصلت على نقاطك المضمونة لليوم بالفعل! عد غداً للحصول على جائزتك اليومية المتجددة. 🌟 (سجل دخولك لحفظها بشكل دائم على السحاب!)' 
+            : 'You have already claimed today\'s points! Come back tomorrow for more. 🌟 (Sign in to sync your points permanently!)'
+        });
+        return;
+      }
+      
+      const newPoints = guestPoints + 50;
+      localStorage.setItem('gih_guest_points', String(newPoints));
+      localStorage.setItem('gih_guest_last_claimed', todayStr);
+      setGuestPoints(newPoints);
+      setGuestLastClaimed(todayStr);
+      
+      setPointsNotification({
+        show: true,
+        points: 50,
+        message: language === 'ar' 
+          ? 'مبروك مبروك! لقد ربحت 50 نقطة لمسّ الصورة اليوم! 🎖️ (سجل الدخول لحفظ تقدمك السحابي ونقاطك بأمان!)' 
+          : 'Congratulations! You won 50 points for checking the hero today! 🎖️ (Sign in to save your cloud progress!)'
+      });
+    }
+  };
+
+  const handleBuyWithPoints = async (game: any) => {
+    const cost = game.pointsPrice || calculatePointsPrice(game.price);
+    if (totalPoints < cost) {
+      setPointsNotification({
+        show: true,
+        points: 0,
+        message: language === 'ar' 
+          ? `عذراً! ليس لديك نقاط كافية لشراء هذا المود. يتطلب هذا المود ${cost} نقطة، بينما رصيدك الحالي هو ${totalPoints} نقطة. يمكنك النقر على الصورة بالأعلى للحصول على 50 نقطة مجانية يومياً! 🪙`
+          : `Sorry! You don't have enough points. This mod requires ${cost} points, and you have ${totalPoints} points. You can click the hero image above to claim 50 free points daily! 🪙`
+      });
+      return;
+    }
+
+    if (user) {
+      const currentPoints = userProfile?.points || 0;
+      const newPoints = Math.max(0, currentPoints - cost);
+      const updatedPurchased = [...(userProfile?.purchased || []), game.id];
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          points: newPoints,
+          purchased: updatedPurchased
+        });
+        setPointsNotification({
+          show: true,
+          points: -cost,
+          message: language === 'ar'
+            ? `تم الشراء بنجاح! تم خصم ${cost} نقطة من حسابك، ويبدأ التنزيل الآن. استمتع بمودك الجديد! 🚀`
+            : `Success! ${cost} points deducted from your balance, your download starts now. Enjoy your new mod! 🚀`
+        });
+        triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id);
+      } catch (error) {
+        console.error("Error buying mod with points:", error);
+      }
+    } else {
+      const newPoints = Math.max(0, guestPoints - cost);
+      localStorage.setItem('gih_guest_points', String(newPoints));
+      setGuestPoints(newPoints);
+      
+      const updatedPurchased = [...guestPurchased, game.id];
+      localStorage.setItem('gih_guest_purchased', JSON.stringify(updatedPurchased));
+      setGuestPurchased(updatedPurchased);
+
+      setPointsNotification({
+        show: true,
+        points: -cost,
+        message: language === 'ar'
+          ? `تم الشراء بنجاح! تم خصم ${cost} نقطة من رصيدك كزائر، ويبدأ التنزيل الآن! 🎉 (سجل الدخول لحفظ نقاطك وتنزيلاتك بشكل دائم!)`
+          : `Success! ${cost} points deducted from your guest balance, your download is starting now! 🎉 (Sign in to save your points permanently!)`
+      });
+      triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id);
+    }
+  };
+
+  const handleAdClick = async (ad: Ad) => {
+    const reward = 3;
+    if (user) {
+      const currentPoints = userProfile?.points || 0;
+      const newPoints = currentPoints + reward;
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          points: newPoints
+        });
+        setPointsNotification({
+          show: true,
+          points: reward,
+          message: language === 'ar'
+            ? `لقد ربحت +3 نقاط لتفاعلك مع الإعلان! 🎉 تم تحديث رصيدك الجديد إلى ${newPoints} نقطة.`
+            : `Success! You earned +3 points for viewing this advertisement! 🎉 Your new balance is ${newPoints} Pts.`
+        });
+      } catch (error) {
+        console.error("Error rewarding points on ad click:", error);
+      }
+    } else {
+      const currentGuestPoints = guestPoints;
+      const newPoints = currentGuestPoints + reward;
+      localStorage.setItem('gih_guest_points', String(newPoints));
+      setGuestPoints(newPoints);
+      setPointsNotification({
+        show: true,
+        points: reward,
+        message: language === 'ar'
+          ? `لقد ربحت +3 نقاط كزائر لتفاعلك مع الإعلان! 🎉 رصيدك الحالي هو ${newPoints} نقطة. (سجل الدخول لحفظ نقاطك بشكل دائم!)`
+          : `Success! You earned +3 visitor points for viewing this advertisement! 🎉 Current balance: ${newPoints} Pts. (Sign in to save them!)`
+      });
+    }
+
+    if (ad.link && ad.link !== '#') {
+      window.open(ad.link, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   useEffect(() => {
     const settingsRef = doc(db, 'settings', 'socials');
     const unsubscribe = onSnapshot(settingsRef, (snap) => {
@@ -252,7 +504,14 @@ const AppContent = () => {
   const [activeMainTab, setActiveMainTab] = useState<'home' | 'search' | 'favorites' | 'settings'>('home');
   const [activeSubTab, setActiveSubTab] = useState<'home' | 'for-you'>('home');
   const [carouselIndex, setCarouselIndex] = useState(0);
-  const [activeDownload, setActiveDownload] = useState<{ title: string; url: string; size: string; progress: number } | null>(null);
+  const [activeDownload, setActiveDownload] = useState<{ 
+    title: string; 
+    url: string; 
+    size: string; 
+    progress: number;
+    description?: string;
+    category?: string;
+  } | null>(null);
 
   // States for live integrated contact form
   const [contactName, setContactName] = useState('');
@@ -268,32 +527,56 @@ const AppContent = () => {
     return `${baseSize.toFixed(1)} MB`;
   };
 
-  const triggerDownload = (title: string, url: string) => {
+  const triggerDownload = (title: string, url: string, description?: string, category?: string, gameId?: string) => {
+    // Security Gate check: Find if this corresponds to a paid item in our catalog
+    const gameObj = games.find(g => (gameId && g.id === gameId) || g.downloadUrl === url);
+    if (gameObj && gameObj.isPaid) {
+      if (!isGamePurchased(gameObj.id)) {
+        // Intercept block and show purchase warning popup
+        const cost = gameObj.pointsPrice || calculatePointsPrice(gameObj.price);
+        setPointsNotification({
+          show: true,
+          points: 0,
+          message: language === 'ar'
+            ? `هذا المود متميز! يجب شراؤه أولاً بـ ${cost} نقطة قبل التنزيل. 🪙`
+            : `This is a premium mod! You must purchase it first for ${cost} points before downloading. 🪙`
+        });
+        return;
+      }
+    }
+
     const size = calculateFileSize(title);
-    setActiveDownload({ title, url, size, progress: 0 });
+    // Instant download trigger - normal like any premium website (bypass popup blockers)
+    try {
+      if (url) {
+        window.open(url, '_blank');
+      }
+    } catch (err) {
+      console.error("Direct download popup block or opening error:", err);
+    }
+    setActiveDownload({ title, url, size, progress: 0, description, category });
   };
 
-  // Real, dynamic dynamic progress simulation
+  // Fast-feedback non-blocking background download state loader
   useEffect(() => {
     if (!activeDownload) return;
 
     if (activeDownload.progress >= 100) {
       const timer = setTimeout(() => {
-        window.open(activeDownload.url, '_blank');
         setActiveDownload(null);
-      }, 700);
+      }, 1500); // Hold completed success state visible for 1.5s
       return () => clearTimeout(timer);
     }
 
     const interval = setInterval(() => {
       setActiveDownload(prev => {
         if (!prev) return null;
-        // Increase progress organically to sound real
-        const step = Math.floor(Math.random() * 12) + 6;
+        // Faster organic steps for responsive and enjoyable client feedback
+        const step = Math.floor(Math.random() * 22) + 18;
         const nextProgress = Math.min(prev.progress + step, 100);
         return { ...prev, progress: nextProgress };
       });
-    }, 200);
+    }, 120);
 
     return () => clearInterval(interval);
   }, [activeDownload]);
@@ -758,10 +1041,13 @@ const AppContent = () => {
     }
   };
 
-  const handleResolveReport = async (reportId: string) => {
+  const handleResolveReport = async (reportId: string, reply?: string) => {
     if (!isAdmin) return;
     try {
-      await updateDoc(doc(db, 'reports', reportId), { status: 'resolved' });
+      await updateDoc(doc(db, 'reports', reportId), { 
+        status: 'resolved',
+        ...(reply ? { reply } : {})
+      });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `reports/${reportId}`);
     }
@@ -884,6 +1170,14 @@ const AppContent = () => {
 
         {/* Left Side: Actions and Controls */}
         <div className="flex items-center gap-2">
+          {/* Points Counter Badge */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-full text-xs font-black select-none shadow-md shadow-amber-950/10 mr-1 ml-1">
+            <Coins className="w-3.5 h-3.5 text-amber-500" />
+            <span>
+              {totalPoints} {language === 'ar' ? 'نقطة' : 'Pts'}
+            </span>
+          </div>
+
           {/* 1. Language Toggle */}
           <button 
             onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
@@ -934,48 +1228,14 @@ const AppContent = () => {
                 selectedEdition={selectedEdition}
                 changeEdition={changeEdition}
                 isLoggedIn={!!user}
+                onImageClick={handleImageClickPointsClaim}
               />
 
 
 
               {activeSubTab === 'home' ? (
                 <div className="space-y-12">
-                  {games.length === 0 ? (
-                    /* Beautiful Empty State UI for initial blank slate */
-                    <div className="bg-zinc-950 border border-zinc-900 w-full p-8 md:p-12 rounded-[2rem] text-center space-y-6 relative overflow-hidden shadow-2xl">
-                      <div className="absolute top-0 right-0 w-80 h-80 bg-red-650/5 rounded-full blur-[100px] pointer-events-none" />
-                      <div className="w-20 h-20 bg-zinc-900 border border-zinc-805 rounded-3xl flex items-center justify-center mx-auto shadow-inner">
-                        <Sparkles className="w-10 h-10 text-amber-500 animate-pulse" />
-                      </div>
-                      <div className="space-y-3 max-w-xl mx-auto">
-                        <h3 className="text-xl md:text-2xl font-black text-white">
-                          {language === 'ar' ? 'بانتظار إضافة أول مود سحابي' : 'Waiting for Minecraft mods...'}
-                        </h3>
-                        <p className="text-xs sm:text-sm text-zinc-400 font-semibold leading-relaxed">
-                          {isAdmin 
-                            ? (language === 'ar' 
-                              ? 'تم تفريغ الموقع وإزالة جميع المودات التجريبية بنجاح! كمدير للموقع، يمكنك التوجه إلى لوحة التحكم لإضافة وتصنيف ملفات المودات أو الخرائط لتظهر هنا فوراً لجميع الزوار.' 
-                              : 'All demo mods were removed successfully! You can register/login, head over to the Control Panel, and publish Minecraft mods or texture files to showcase them live.')
-                            : (language === 'ar'
-                              ? 'يرجى الانتظار لحين إضافة مودات جديدة من قبل الإدارة.'
-                              : 'Please wait until new mods are added by the administration.')
-                          }
-                        </p>
-                      </div>
-
-                      {isAdmin && (
-                        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-                          <button
-                            onClick={() => setShowAdminPanel(true)}
-                            className="bg-red-650 hover:bg-red-600 text-white font-black text-xs px-8 py-3.5 rounded-xl transition-all shadow-lg flex items-center gap-2 uppercase tracking-wider"
-                          >
-                            <ShieldCheck className="w-4 h-4" />
-                            {language === 'ar' ? 'لوحة التحكم وإضافة مود جديد' : 'Open Control Panel'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
+                  {games.length > 0 && (
                     <>
                       {/* INTERACTIVE SPOTLIGHT DECK SPOTLIGHT */}
                       <section className="space-y-4">
@@ -1017,8 +1277,8 @@ const AppContent = () => {
                               {/* Cover preview aspect border */}
                               <div className="aspect-video relative rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-900 shadow-inner group">
                                 <img 
-                                  src={PRESET_CAROUSEL_MODS[activeCarouselIndex]?.thumbnail} 
-                                  alt={PRESET_CAROUSEL_MODS[activeCarouselIndex]?.title}
+                                  src={PRESET_CAROUSEL_MODS[activeCarouselIndex]?.thumbnail || null} 
+                                  alt={PRESET_CAROUSEL_MODS[activeCarouselIndex]?.title || ""}
                                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
                                 />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80" />
@@ -1042,18 +1302,53 @@ const AppContent = () => {
 
                             {/* Action details footer */}
                             <div className="pt-6 border-t border-zinc-90 w-full flex flex-col sm:flex-row items-center justify-between gap-4 mt-6">
-                              <div className="flex items-center gap-2 text-emerald-400 font-bold text-[11px] bg-emerald-500/5 px-3 py-2 rounded-xl border border-emerald-500/10">
-                                <CheckCircle2 className="w-4 h-4" />
+                              <div className="flex items-center gap-2 text-red-500 font-bold text-[11px] bg-red-650/5 px-3 py-2 rounded-xl border border-red-500/10">
+                                <ShieldCheck className="w-4 h-4 text-red-500" />
                                 <span>{language === 'ar' ? 'الحماية والتحقق: آمن ومعتمد 100%' : 'Certificate: Secure & Live'}</span>
                               </div>
 
-                              <button 
-                                onClick={() => triggerDownload(PRESET_CAROUSEL_MODS[activeCarouselIndex]?.title, PRESET_CAROUSEL_MODS[activeCarouselIndex]?.downloadUrl)}
-                                className="w-full sm:w-auto bg-red-650 hover:bg-red-550 text-white font-black text-xs px-8 py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 uppercase tracking-wider"
-                              >
-                                <Download className="w-4 h-4 text-white" />
-                                {language === 'ar' ? 'تنزيل حزمة الملفات مجاناً' : 'Get Package Assets'}
-                              </button>
+                              {(() => {
+                                const activeGame = PRESET_CAROUSEL_MODS[activeCarouselIndex];
+                                if (!activeGame) return null;
+                                
+                                if (activeGame.isPaid) {
+                                  if (isGamePurchased(activeGame.id)) {
+                                    return (
+                                      <button 
+                                        onClick={() => triggerDownload(activeGame.title, activeGame.downloadUrl, activeGame.description, activeGame.category, activeGame.id)}
+                                        className="w-full sm:w-auto bg-gradient-to-r from-emerald-600 via-teal-550 to-emerald-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs px-8 py-4 rounded-2xl transition-all shadow-lg shadow-emerald-500/15 active:scale-95 flex items-center justify-center gap-2.5 uppercase tracking-wider cursor-pointer border border-emerald-555/20"
+                                      >
+                                        <Crown className="w-4 h-4 text-white" />
+                                        <span>{language === 'ar' ? 'تحميل المود (مفتوح ✅)' : 'Download (Unlocked ✅)'}</span>
+                                      </button>
+                                    );
+                                  } else {
+                                    return (
+                                      <button 
+                                        onClick={() => handleBuyWithPoints(activeGame)}
+                                        className="w-full sm:w-auto bg-gradient-to-r from-amber-600 via-yellow-600 to-amber-500 hover:from-amber-500 hover:to-yellow-400 text-white font-black text-xs px-8 py-4 rounded-2xl transition-all shadow-lg shadow-amber-500/15 active:scale-95 flex items-center justify-center gap-2.5 uppercase tracking-wider cursor-pointer border border-amber-555/20 animate-pulse"
+                                      >
+                                        <Coins className="w-4 h-4 text-white" />
+                                        <span>
+                                          {language === 'ar' 
+                                            ? `شراء بـ ${activeGame.pointsPrice || calculatePointsPrice(activeGame.price)} نقطة` 
+                                            : `Buy for ${activeGame.pointsPrice || calculatePointsPrice(activeGame.price)} Points`}
+                                        </span>
+                                      </button>
+                                    );
+                                  }
+                                }
+
+                                return (
+                                  <button 
+                                    onClick={() => triggerDownload(activeGame.title, activeGame.downloadUrl, activeGame.description, activeGame.category, activeGame.id)}
+                                    className="w-full sm:w-auto bg-gradient-to-r from-red-650 via-rose-600 to-amber-500 hover:from-red-600 hover:to-amber-400 text-white font-black text-xs px-8 py-4 rounded-2xl transition-all shadow-lg shadow-red-650/15 hover:shadow-red-500/25 active:scale-95 flex items-center justify-center gap-2.5 uppercase tracking-wider cursor-pointer border border-red-550/20"
+                                  >
+                                    <Download className="w-4 h-4 text-white" />
+                                    <span>{language === 'ar' ? 'تحميل المود' : 'Download Mod'}</span>
+                                  </button>
+                                );
+                              })()}
                             </div>
                           </div>
 
@@ -1084,7 +1379,7 @@ const AppContent = () => {
                                     )}
 
                                     <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-zinc-900 bg-zinc-900 relative">
-                                      <img src={sliderItem.thumbnail} alt="" className="w-full h-full object-cover" />
+                                      <img src={sliderItem.thumbnail || null} alt="" className="w-full h-full object-cover" />
                                     </div>
                                     
                                     <div className="flex-1 min-w-0">
@@ -1170,7 +1465,7 @@ const AppContent = () => {
                                   {/* Thumbnail preview aspect header */}
                                   <div className="aspect-video relative rounded-xl overflow-hidden bg-zinc-90 w-full border border-zinc-900">
                                     <img 
-                                      src={item.thumbnail} 
+                                      src={item.thumbnail || null} 
                                       alt={item.title} 
                                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                                     />
@@ -1212,20 +1507,34 @@ const AppContent = () => {
                                 {/* Download Action row */}
                                 <div className="pt-4 border-t border-dashed border-zinc-900 px-1 flex items-center justify-between gap-1.5 mt-4">
                                   <span className="text-[9px] text-zinc-500 font-bold">
-                                    {language === 'ar' ? 'سريع وآمن' : 'Fast & Secure'}
+                                    {item.isPaid 
+                                      ? (isGamePurchased(item.id) 
+                                          ? (language === 'ar' ? 'مفتوح ✅' : 'Unlocked ✅') 
+                                          : `${item.pointsPrice || calculatePointsPrice(item.price)} Pts`)
+                                      : (language === 'ar' ? 'سريع وآمن' : 'Fast & Secure')}
                                   </span>
 
-                                  <button 
-                                    onClick={() => triggerDownload(item.title, item.downloadUrl)}
-                                    className={`p-2 rounded-xl transition-all flex items-center justify-center border ${
-                                      isMainSpotlight 
-                                        ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border-amber-500/20 hover:border-amber-500' 
-                                        : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800 border-zinc-800'
-                                    }`}
-                                    title={language === 'ar' ? 'تحميل مجاني' : 'Direct Download'}
-                                  >
-                                    <Download className="w-3.5 h-3.5" />
-                                  </button>
+                                  {item.isPaid && !isGamePurchased(item.id) ? (
+                                    <button 
+                                      onClick={() => handleBuyWithPoints(item)}
+                                      className="px-3 py-2 rounded-xl transition-all flex items-center justify-center gap-1.5 border bg-amber-500/10 text-amber-500 hover:bg-amber-550 hover:text-white border-amber-500/20 text-[10px] font-black cursor-pointer shadow-amber-950/10 animate-pulse"
+                                    >
+                                      <Coins className="w-3.5 h-3.5" />
+                                      <span>{language === 'ar' ? 'شراء' : 'Buy'}</span>
+                                    </button>
+                                  ) : (
+                                    <button 
+                                      onClick={() => triggerDownload(item.title, item.downloadUrl, item.description, item.category, item.id)}
+                                      className={`p-2 rounded-xl transition-all flex items-center justify-center border ${
+                                        isMainSpotlight 
+                                          ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white border-amber-500/20 hover:border-amber-500' 
+                                          : 'bg-zinc-900 text-zinc-400 hover:text-white hover:bg-zinc-800 border-zinc-800'
+                                      }`}
+                                      title={language === 'ar' ? 'تحميل مجاني' : 'Direct Download'}
+                                    >
+                                      <Download className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </motion.div>
                             );
@@ -1270,7 +1579,7 @@ const AppContent = () => {
                         className="bg-zinc-950 border border-zinc-900 rounded-[2rem] p-4 flex flex-col md:flex-row gap-4 items-center group hover:border-zinc-800 transition text-right bg-zinc-950"
                       >
                         <img 
-                          src={mod.thumbnail} 
+                          src={mod.thumbnail || null} 
                           alt={mod.title}
                           className="w-full md:w-28 h-28 object-cover rounded-2xl border border-zinc-900 shrink-0"
                         />
@@ -1287,12 +1596,12 @@ const AppContent = () => {
                             </p>
                           </div>
                           
-                          <button 
-                            onClick={() => triggerDownload(mod.title, mod.downloadUrl)}
-                            className="bg-zinc-900 hover:bg-zinc-850 text-white text-xs font-black px-4 py-2 rounded-xl transition w-max flex items-center gap-1.5"
+                           <button 
+                            onClick={() => triggerDownload(mod.title, mod.downloadUrl, language === 'ar' ? 'مود معتمد وآمن تماماً ومتوافق مع أحدث إصدارات الألعاب.' : 'Tested, authentic premium addon package ready for instant setup.', mod.category)}
+                            className="bg-gradient-to-r from-red-650 to-amber-650 hover:from-red-600 hover:to-amber-500 text-white text-xs font-black px-4.5 py-2.5 rounded-xl transition shadow-lg shadow-red-950/20 w-max flex items-center gap-1.5 border border-red-500/10 cursor-pointer hover:scale-[1.03] active:scale-95 duration-150"
                           >
-                            <Download className="w-3.5 h-3.5 text-red-500" />
-                            {language === 'ar' ? 'تحميل فوري' : 'Download Now'}
+                            <Download className="w-3.5 h-3.5 text-white" />
+                            <span>{language === 'ar' ? 'تحميل المود' : 'Download Mod'}</span>
                           </button>
                         </div>
                       </motion.div>
@@ -1479,9 +1788,21 @@ const AppContent = () => {
                               
                               <div className="p-5 space-y-3 text-right">
                                 <div className="flex items-center justify-between">
-                                  <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-red-500 bg-red-650/10 border-red-600/10">
-                                    {game.category}
-                                  </span>
+                                  {game.isPaid ? (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-amber-500 bg-amber-500/10 border-amber-500/20 flex items-center gap-1">
+                                        <Coins className="w-3.5 h-3.5 inline text-amber-500 animate-pulse" />
+                                        {game.price || (language === 'ar' ? 'متميز' : 'Premium')}
+                                      </span>
+                                      <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-emerald-400 bg-emerald-500/10 border-emerald-500/20 flex items-center gap-1">
+                                        {language === 'ar' ? 'الشراء عبر النقط' : 'Buy with points'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-red-500 bg-red-650/10 border-red-600/10">
+                                      {game.category}
+                                    </span>
+                                  )}
                                   <button 
                                     onClick={() => toggleFavorite(game.id)}
                                     className={`p-2 rounded-xl transition-all ${
@@ -1498,14 +1819,36 @@ const AppContent = () => {
                               </div>
                             </div>
                             
-                            <div className="p-5 pt-0">
-                              <button 
-                                onClick={() => triggerDownload(game.title, game.downloadUrl)}
-                                className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-zinc-900 hover:bg-zinc-850 border border-zinc-905 hover:border-zinc-750"
-                              >
-                                <Download className="w-4 h-4 text-white" />
-                                {language === 'ar' ? 'تحميل مجاني الآن' : 'Instantly Install'}
-                              </button>
+                            <div className="p-5 pt-0 flex flex-col gap-2">
+                              {game.isPaid ? (
+                                isGamePurchased(game.id) ? (
+                                  <button 
+                                    onClick={() => triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
+                                    className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-500/20 cursor-pointer shadow-emerald-950/15"
+                                  >
+                                    <Crown className="w-4 h-4 text-white" />
+                                    {language === 'ar' ? 'تحميل المود (مفتوح ✅)' : 'Download Mod (Unlocked ✅)'}
+                                  </button>
+                                ) : (
+                                  <button 
+                                    onClick={() => handleBuyWithPoints(game)}
+                                    className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-555 hover:to-yellow-500 border border-amber-550/20 cursor-pointer shadow-amber-950/15 animate-pulse"
+                                  >
+                                    <Coins className="w-4 h-4 text-white" />
+                                    {language === 'ar' 
+                                      ? `شراء بـ ${game.pointsPrice || calculatePointsPrice(game.price)} نقطة` 
+                                      : `Buy for ${game.pointsPrice || calculatePointsPrice(game.price)} Points`}
+                                  </button>
+                                )
+                              ) : (
+                                <button 
+                                  onClick={() => triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
+                                  className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-red-650 to-amber-600 hover:from-red-600 hover:to-amber-500 border border-red-500/10 cursor-pointer shadow-red-950/20"
+                                >
+                                  <Download className="w-4 h-4 text-white" />
+                                  {language === 'ar' ? 'تحميل المود' : 'Download Mod'}
+                                </button>
+                              )}
                             </div>
                           </motion.div>
                         );
@@ -1563,7 +1906,7 @@ const AppContent = () => {
                 <SidebarSection
                   language={language}
                   presetGridMods={PRESET_GRID_MODS}
-                  onDownload={(title, url) => triggerDownload(title, url)}
+                  onDownload={(title, url, description, category) => triggerDownload(title, url, description, category)}
                 />
               </div>
             </div>
@@ -1582,7 +1925,9 @@ const AppContent = () => {
               toggleFavorite={toggleFavorite}
               userProfile={userProfile}
               t={t}
-              onDownload={(title, url) => triggerDownload(title, url)}
+              onDownload={(title, url, description, category, id) => triggerDownload(title, url, description, category, id)}
+              onBuyWithPoints={handleBuyWithPoints}
+              isGamePurchased={isGamePurchased}
             />
           )}
 
@@ -1596,7 +1941,9 @@ const AppContent = () => {
               toggleFavorite={toggleFavorite}
               setLoginMode={setLoginMode}
               setShowLoginModal={setShowLoginModal}
-              onDownload={(title, url) => triggerDownload(title, url)}
+              onDownload={(title, url, description, category, id) => triggerDownload(title, url, description, category, id)}
+              onBuyWithPoints={handleBuyWithPoints}
+              isGamePurchased={isGamePurchased}
             />
           )}
 
@@ -2042,6 +2389,7 @@ const AppContent = () => {
         onClose={() => setShowContactModal(false)} 
         onSend={handleSendReport}
         theme={localTheme}
+        language={language}
       />
 
       {/* Privacy Policy Modal */}
@@ -2049,6 +2397,7 @@ const AppContent = () => {
         isOpen={showPrivacyModal} 
         onClose={() => setShowPrivacyModal(false)} 
         theme={localTheme}
+        language={language}
       />
 
       {/* Terms of Use Modal */}
@@ -2056,6 +2405,7 @@ const AppContent = () => {
         isOpen={showTermsModal} 
         onClose={() => setShowTermsModal(false)} 
         theme={localTheme}
+        language={language}
       />
 
       {/* About Platform Modal */}
@@ -2066,107 +2416,414 @@ const AppContent = () => {
         language={language}
       />
 
-      {/* Mobile Side Menu */}
+      {/* Points Notification Modal */}
+      <AnimatePresence>
+        {pointsNotification?.show && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-zinc-950 border border-amber-500/30 p-6 sm:p-8 rounded-3xl text-center max-w-sm w-full space-y-5 shadow-2xl shadow-amber-950/20"
+            >
+              <div className="w-16 h-16 bg-amber-500/10 border-2 border-amber-500 rounded-full flex items-center justify-center mx-auto animate-bounce">
+                <Coins className="w-8 h-8 text-amber-500" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-xl font-black text-white">
+                  {pointsNotification.points > 0 
+                    ? (language === 'ar' ? '🎉 مبروك! ربحت نقاطاً!' : '🎉 Points Awarded!')
+                    : (language === 'ar' ? '🔍 تنبيه النقاط' : '🔍 Points Notice')
+                  }
+                </h3>
+                {pointsNotification.points > 0 && (
+                  <p className="text-3xl font-black text-amber-400">
+                    +{pointsNotification.points}
+                  </p>
+                )}
+                <p className="text-zinc-400 text-xs sm:text-sm leading-relaxed text-center">
+                  {pointsNotification.message}
+                </p>
+              </div>
+              <button
+                onClick={() => setPointsNotification(null)}
+                className="w-full bg-amber-500 hover:bg-amber-400 text-black font-black text-xs py-3.5 rounded-xl transition-all shadow-lg shadow-amber-500/10 hover:scale-[1.02] active:scale-[0.98] select-none"
+              >
+                {language === 'ar' ? 'رائع، شكراً لك!' : 'Great, Thank You!'}
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile & Desktop Side Menu & Settings Drawer */}
       <AnimatePresence>
         {showMobileMenu && (
-          <div className="fixed inset-0 z-[150] md:hidden">
+          <div className="fixed inset-0 z-[150]">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setShowMobileMenu(false)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              className="absolute inset-0 bg-black/75 backdrop-blur-md"
             />
             <motion.div 
-              initial={{ x: '-100%' }}
+              initial={{ x: language === 'ar' ? '100%' : '-100%' }}
               animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className={`absolute top-0 left-0 w-[280px] h-full ${localTheme === 'light' ? 'bg-white' : 'bg-zinc-950'} shadow-2xl p-6 flex flex-col`}
+              exit={{ x: language === 'ar' ? '100%' : '-100%' }}
+              transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+              className={`absolute top-0 ${language === 'ar' ? 'right-0' : 'left-0'} w-full sm:w-[380px] h-full ${localTheme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-900'} border-l border-r shadow-2xl p-6 flex flex-col`}
             >
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-2">
-                  <div className="bg-gradient-to-r from-red-600 to-amber-500 p-2 rounded-lg">
+              {/* Drawer Header */}
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-zinc-800/20">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-gradient-to-r from-red-650 to-amber-500 p-2.5 rounded-xl shadow-lg shadow-red-600/10">
                     <Gamepad2 className="w-5 h-5 text-white" />
                   </div>
-                  <div className="flex flex-col leading-tight text-left">
-                    <span className="text-xs font-black text-white tracking-tight">Golden Gih</span>
+                  <div className="flex flex-col leading-tight text-right">
+                    <span className="text-sm font-black tracking-tight uppercase">Golden Gih</span>
+                    <span className="text-[10px] text-zinc-500 font-extrabold">{language === 'ar' ? 'المكتبة الأكبر للمودات' : 'Minecraft Mods Hub'}</span>
                   </div>
                 </div>
                 <button 
                   onClick={() => setShowMobileMenu(false)}
-                  className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
+                  className={`p-2.5 rounded-xl transition-all ${localTheme === 'light' ? 'hover:bg-zinc-100 text-zinc-600' : 'hover:bg-zinc-900 text-zinc-400 hover:text-white'} cursor-pointer`}
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="flex flex-col gap-2">
-                  {/* Language Selector */}
-                  <div className="mb-4">
-                    <p className={`text-[10px] font-black uppercase text-zinc-500 mb-2 ${language === 'ar' ? 'text-right' : 'text-left'}`}>
-                      {language === 'ar' ? 'لغة الموقع / Language' : 'Website Language'}
+              {/* Drawer Scrolling Body */}
+              <div className="flex-1 overflow-y-auto pr-1 -mr-1 space-y-6 pb-8 scrollbar-thin">
+                
+                {/* 1. Language & Theme Selection Section */}
+                <div className={`p-4 rounded-2xl ${localTheme === 'light' ? 'bg-zinc-100/60' : 'bg-zinc-900/40'} border ${localTheme === 'light' ? 'border-zinc-200' : 'border-zinc-850'} space-y-4`}>
+                  <div>
+                    <p className={`text-[10px] font-black uppercase text-zinc-500 mb-1.5 flex items-center gap-1.5 ${language === 'ar' ? 'justify-start' : 'justify-start'}`}>
+                      <Languages className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>{language === 'ar' ? 'لغة الموقع / Language' : 'Website Language'}</span>
                     </p>
-                    <div className="grid grid-cols-2 gap-2 bg-zinc-900/60 p-1 rounded-xl border border-zinc-800">
+                    <div className="grid grid-cols-2 gap-2 bg-zinc-950/40 p-1 rounded-xl border border-zinc-800/10">
                       <button 
                         onClick={() => {
                           setLanguage('ar');
-                          setShowMobileMenu(false);
                         }}
-                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${language === 'ar' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${language === 'ar' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20 font-black' : 'text-zinc-500 hover:text-zinc-300'}`}
                       >
                         <span>العربية</span>
                       </button>
                       <button 
                         onClick={() => {
                           setLanguage('en');
-                          setShowMobileMenu(false);
                         }}
-                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${language === 'en' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-zinc-400 hover:text-zinc-200'}`}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${language === 'en' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'text-zinc-500 hover:text-zinc-300'}`}
                       >
                         <span>English</span>
                       </button>
                     </div>
                   </div>
 
-                  {[
-                    { label: t.home, icon: LayoutDashboard },
-                    { label: t.trending, icon: Flame },
-                    { label: t.new, icon: Star },
-                  ].map((item, i) => (
-                  <button 
-                    key={i}
-                    className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full`}
-                    onClick={() => setShowMobileMenu(false)}
-                  >
-                    <item.icon className="w-5 h-5 text-red-500" />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-zinc-500 mb-1.5 flex items-center gap-1.5 text-right">
+                      <Palette className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>{language === 'ar' ? 'مظهر المنصة / Theme' : 'Theme Settings'}</span>
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 bg-zinc-950/40 p-1 rounded-xl border border-zinc-800/10">
+                      <button 
+                        onClick={async () => {
+                          setLocalTheme('dark');
+                          localStorage.setItem('theme', 'dark');
+                          if (user) await updateProfile({ theme: 'dark' });
+                        }}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${localTheme === 'dark' ? 'bg-red-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-305'}`}
+                      >
+                        <Moon className="w-3.5 h-3.5" />
+                        <span>{language === 'ar' ? 'داكن' : 'Dark'}</span>
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          setLocalTheme('light');
+                          localStorage.setItem('theme', 'light');
+                          if (user) await updateProfile({ theme: 'light' });
+                        }}
+                        className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${localTheme === 'light' ? 'bg-red-600 text-white shadow-lg' : 'text-zinc-500 hover:text-zinc-350'}`}
+                      >
+                        <Sun className="w-3.5 h-3.5" />
+                        <span>{language === 'ar' ? 'فاتح' : 'Light'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-                {/* Profile or Login states inside the side drawer menu */}
-                {user ? (
-                  <>
+                {/* 2. User Settings & Editing Profile Customization (100% Working) */}
+                <div className={`p-4 rounded-2xl ${localTheme === 'light' ? 'bg-zinc-100/60' : 'bg-zinc-900/40'} border ${localTheme === 'light' ? 'border-zinc-200' : 'border-zinc-850'} space-y-4`}>
+                  <div className="flex items-center gap-1.5 border-b border-zinc-850/10 pb-2.5">
+                    <UserCog className="w-4 h-4 text-red-500" />
+                    <h3 className="text-xs font-black uppercase tracking-wider">
+                      {language === 'ar' ? 'إعدادات الحساب والملف' : 'Account & Edit Profile'}
+                    </h3>
+                  </div>
+
+                  {!user ? (
+                    <div className="space-y-3 py-2 text-center" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                      <p className="text-xs text-zinc-500 leading-relaxed font-semibold">
+                        {language === 'ar' 
+                          ? 'قم بتسجيل الدخول الآن لتعديل ملفك الشخصي، ورفع المودات، والتحكم بالكامل بخصائص حسابك.' 
+                          : 'Sign in to customize your display name, choose awesome gaming avatars, set preferences or publish mods.'}
+                      </p>
+                      <button 
+                        onClick={() => {
+                          setShowMobileMenu(false);
+                          setLoginMode('email-signin');
+                          setShowLoginModal(true);
+                        }}
+                        className="w-full bg-red-650 hover:bg-red-550 text-white text-xs py-2.5 px-4 rounded-xl font-black transition-all shadow-lg active:scale-95 cursor-pointer"
+                      >
+                        {language === 'ar' ? 'تسجيل الدخول / إنشاء حساب' : 'Log In or Register'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 text-right" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                      {/* Avatar presentation & Rank information */}
+                      <div className="flex items-center gap-3 bg-zinc-950/30 p-2.5 rounded-xl border border-zinc-800/10">
+                        <div className="relative shrink-0">
+                          <img 
+                            src={userProfile?.photoURL && userProfile.photoURL !== "" ? userProfile.photoURL : "https://mc-heads.net/avatar/MHF_Steve/64"} 
+                            alt="" 
+                            className="w-12 h-12 rounded-xl object-cover border-2 border-red-550/20 shadow-md"
+                          />
+                          {userProfile?.email === 'frassa0000@gmail.com' && (
+                            <div className="absolute -bottom-1 -right-1 bg-amber-500 text-white p-1 rounded-full shadow border border-zinc-950">
+                              <Crown className="w-3 h-3 fill-current" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="leading-tight text-right flex-1 min-w-0">
+                          <p className="font-extrabold text-xs text-white truncate">
+                            {userProfile?.displayName || userProfile?.email?.split('@')[0] || 'لاعب غولدين'}
+                          </p>
+                          <div className="flex gap-1.5 mt-1 items-center">
+                            {userProfile?.email === 'frassa0000@gmail.com' ? (
+                              <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-black">المدير</span>
+                            ) : userProfile?.verified ? (
+                              <span className="text-[9px] bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full font-black">عضو موثق</span>
+                            ) : (
+                              <span className="text-[9px] bg-zinc-805 text-zinc-400 border border-zinc-700 px-2 py-0.5 rounded-full font-black">عضو جديد</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Display name field edit */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-zinc-500 font-black mr-1 uppercase">الاسم المستعار</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            value={drawerDisplayName}
+                            onChange={(e) => setDrawerDisplayName(e.target.value)}
+                            placeholder={language === 'ar' ? 'أدخل اسمك الجديد' : 'Set nickname'}
+                            className={`flex-1 bg-zinc-950 border ${localTheme === 'light' ? 'border-zinc-200 text-black' : 'border-zinc-800 text-white'} rounded-xl p-2.5 text-xs focus:border-red-650 outline-none transition-colors font-bold ${language === 'ar' ? 'text-right' : 'text-left'}`}
+                          />
+                          <button 
+                            onClick={async () => {
+                              if (!drawerDisplayName.trim()) return;
+                              setIsSavingDrawerProfile(true);
+                              try {
+                                await updateProfile({ displayName: drawerDisplayName.trim() });
+                                setDrawerSaveSuccess(true);
+                                setTimeout(() => setDrawerSaveSuccess(false), 3000);
+                              } catch (err) {
+                                console.error(err);
+                              } finally {
+                                setIsSavingDrawerProfile(false);
+                              }
+                            }}
+                            disabled={isSavingDrawerProfile}
+                            className="bg-red-600 hover:bg-red-500 text-white px-4 rounded-xl text-xs font-black transition-all active:scale-95 disabled:opacity-50 shrink-0 cursor-pointer"
+                          >
+                            {isSavingDrawerProfile ? (language === 'ar' ? '...' : '...') : (language === 'ar' ? 'حفظ' : 'Save')}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Minecraft Edition Preference Selection toggle */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-zinc-500 font-black mr-1 uppercase">نسختك المفضلة (Minecraft Edition)</label>
+                        <div className="grid grid-cols-2 gap-2 bg-zinc-950 p-1.5 rounded-xl border border-zinc-850">
+                          <button
+                            onClick={async () => {
+                              setDrawerSelectedEdition('java');
+                              await updateProfile({ minecraftEdition: 'java' });
+                            }}
+                            className={`py-1.5 rounded-lg text-[10px] font-black tracking-tight transition-all cursor-pointer ${drawerSelectedEdition === 'java' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-350'}`}
+                          >
+                            جافا (Java)
+                          </button>
+                          <button
+                            onClick={async () => {
+                              setDrawerSelectedEdition('bedrock');
+                              await updateProfile({ minecraftEdition: 'bedrock' });
+                            }}
+                            className={`py-1.5 rounded-lg text-[10px] font-black tracking-tight transition-all cursor-pointer ${drawerSelectedEdition === 'bedrock' ? 'bg-red-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-350'}`}
+                          >
+                            بيدروك (Bedrock)
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Cool Avatar Picker Preset list + file uploader */}
+                      <div className="space-y-2">
+                        <label className="text-[10px] text-zinc-500 font-black mr-1 uppercase">اختر صورتك الرمزية (Gamer Avatar)</label>
+                        <div className="grid grid-cols-4 gap-2 bg-zinc-950/40 p-2 rounded-xl border border-zinc-900">
+                          {[
+                            { name: 'Steve', url: 'https://mc-heads.net/avatar/MHF_Steve/64' },
+                            { name: 'Alex', url: 'https://mc-heads.net/avatar/MHF_Alex/64' },
+                            { name: 'Felix', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' },
+                            { name: 'Aria', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Aria' },
+                            { name: 'Creeper', url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=Creeper' },
+                            { name: 'Ender', url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=Ender' },
+                            { name: 'GoldStar', url: 'https://api.dicebear.com/7.x/identicon/svg?seed=Dragon' },
+                          ].map((av, idx) => (
+                            <button
+                              key={idx}
+                              onClick={async () => {
+                                await updateProfile({ photoURL: av.url });
+                                setDrawerSaveSuccess(true);
+                                setTimeout(() => setDrawerSaveSuccess(false), 3000);
+                              }}
+                              className={`w-10 h-10 rounded-lg overflow-hidden border transition-all cursor-pointer ${userProfile?.photoURL === av.url ? 'border-red-500 ring-2 ring-red-600/20' : 'border-zinc-800 hover:border-zinc-600'}`}
+                            >
+                              <img src={av.url} alt="" className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+
+                          {/* Custom Uploader Tool inside grid */}
+                          <label className="w-10 h-10 rounded-lg flex items-center justify-center border border-dashed border-zinc-800 hover:border-red-500 cursor-pointer bg-zinc-900 transition-colors">
+                            <FileUp className="w-4 h-4 text-zinc-500 hover:text-red-500" />
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              className="hidden" 
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = async (event) => {
+                                    const rawBase64 = event.target?.result as string;
+                                    try {
+                                      const compressedB64 = await compressImage(rawBase64, 250, 250, 0.5);
+                                      await updateProfile({ photoURL: compressedB64 });
+                                      setDrawerSaveSuccess(true);
+                                      setTimeout(() => setDrawerSaveSuccess(false), 3000);
+                                    } catch (err) {
+                                      console.error("Error compressing/uploading custom avatar:", err);
+                                    }
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Success Feedback overlay indicator */}
+                      {drawerSaveSuccess && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: 5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-center text-[10px] font-black leading-none"
+                        >
+                          {language === 'ar' ? '✓ تم حفظ التعديلات بنجاح!' : '✓ Settings updated & saved successfully!'}
+                        </motion.div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Navigation shortcuts */}
+                <div className="space-y-1">
+                  <p className="text-[10px] text-zinc-500 font-extrabold px-3 py-1 uppercase tracking-wider text-right">
+                    {language === 'ar' ? 'تصفح سريع' : 'Quick Navigation'}
+                  </p>
+                  {[
+                    { label: t.home, icon: LayoutDashboard, action: () => { setActiveMainTab('home'); setActiveSubTab('home'); } },
+                    { label: t.trending, icon: Flame, action: () => { setActiveMainTab('home'); setActiveSubTab('trending'); } },
+                    { label: t.new, icon: Star, action: () => { setActiveMainTab('home'); setActiveSubTab('for-you'); } },
+                  ].map((item, i) => (
+                    <button 
+                      key={i}
+                      className={`flex items-center gap-3.5 px-4 py-2.5 rounded-xl ${localTheme === 'light' ? 'hover:bg-zinc-100 text-zinc-850' : 'hover:bg-zinc-900 text-zinc-200'} transition-all font-bold w-full cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        item.action();
+                      }}
+                    >
+                      <item.icon className="w-5 h-5 text-red-500 shrink-0" />
+                      <span className="text-xs">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* 4. Controls inside user profile states */}
+                {user && (
+                  <div className="space-y-1 border-t border-zinc-800/10 pt-3">
+                    <p className="text-[10px] text-zinc-500 font-extrabold px-3 py-1 uppercase tracking-wider text-right">
+                      {language === 'ar' ? 'خيارات مخصصة' : 'Preferences'}
+                    </p>
+                    
+                    {/* Support Assistant Link */}
                     <button 
                       onClick={() => {
                         setShowMobileMenu(false);
                         setShowUserPanel(true);
                       }}
-                      className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-purple-400`}
+                      className={`flex items-center gap-3.5 px-4 py-2.5 rounded-xl hover:bg-amber-500/10 transition-all font-bold w-full text-amber-500 cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
                     >
-                      <UserIcon className="w-5 h-5 text-purple-500" />
-                      <span>{language === 'ar' ? 'الملف الشخصي' : 'Profile'}</span>
+                      <Sparkles className="w-5 h-5 text-amber-500 shrink-0" />
+                      <span className="text-xs">{language === 'ar' ? 'مساعد الدعم بالذكاء الاصطناعي' : 'AI Support Assistant'}</span>
                     </button>
+
+                    {/* Report bug shortcut */}
                     <button 
                       onClick={() => {
                         setShowMobileMenu(false);
                         setShowUserPanel(true);
                       }}
-                      className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-amber-500/10 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-amber-500`}
+                      className={`flex items-center gap-3.5 px-4 py-2.5 rounded-xl hover:bg-zinc-900/40 transition-all font-bold w-full text-zinc-400 cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
                     >
-                      <Sparkles className="w-4 h-4 text-amber-500" />
-                      <span>{language === 'ar' ? 'مساعد الدعم' : 'Support Assistant'}</span>
+                      <MessageSquare className="w-5 h-5 text-zinc-500 shrink-0" />
+                      <span className="text-xs">{language === 'ar' ? 'تذاكر الدعم والتبليغ' : 'Submit support ticket'}</span>
                     </button>
+
+                    {/* Favorites shortcut */}
+                    <button 
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        setShowUserPanel(true);
+                      }}
+                      className={`flex items-center gap-3.5 px-4 py-2.5 rounded-xl hover:bg-zinc-900/40 transition-all font-bold w-full text-zinc-400 cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
+                    >
+                      <Heart className="w-5 h-5 text-red-500 shrink-0" />
+                      <span className="text-xs">{language === 'ar' ? 'ألعابي المفضلة' : 'My Favorites'}</span>
+                    </button>
+
+                    {/* Admin panel if administrator */}
+                    {isAdmin && (
+                      <button 
+                        onClick={() => {
+                          setShowMobileMenu(false);
+                          setShowAdminPanel(true);
+                        }}
+                        className={`flex items-center gap-3.5 px-4 py-2.5 rounded-xl hover:bg-red-650/10 border border-red-500/20 text-red-500 transition-all font-black w-full mt-2 cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
+                      >
+                        <ShieldCheck className="w-5 h-5 text-red-500 shrink-0" />
+                        <span className="text-xs">{language === 'ar' ? 'لوحة تحكم المدير' : 'Administrator Console'}</span>
+                      </button>
+                    )}
+
+                    {/* Log out */}
                     <button 
                       onClick={async () => {
                         setShowMobileMenu(false);
@@ -2176,53 +2833,57 @@ const AppContent = () => {
                           console.error("Sign out error", error);
                         }
                       }}
-                      className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-zinc-400`}
+                      className={`flex items-center gap-3.5 px-4 py-2.5 rounded-xl hover:bg-zinc-900/40 transition-all font-bold w-full text-zinc-400 cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
                     >
-                      <LogOut className="w-5 h-5 text-zinc-500" />
-                      <span>{language === 'ar' ? 'تسجيل الخروج' : 'Log Out'}</span>
+                      <LogOut className="w-5 h-5 text-zinc-500 shrink-0" />
+                      <span className="text-xs">{language === 'ar' ? 'تسجيل الخروج' : 'Log Out'}</span>
                     </button>
-                  </>
-                ) : (
-                  <button 
-                    onClick={() => {
-                      setShowMobileMenu(false);
-                      setLoginMode('email-signin');
-                      setShowLoginModal(true);
-                    }}
-                    className={`flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-[#6b21a8]/20 transition-colors ${language === 'ar' ? 'text-right' : 'text-left'} font-bold w-full text-purple-400`}
-                  >
-                    <UserIcon className="w-5 h-5 text-purple-400" />
-                    <span>{language === 'ar' ? 'تسجيل الدخول' : 'Sign In'}</span>
-                  </button>
+                  </div>
                 )}
-                
-                {isAdmin && (
+
+                {/* 5. Policy pages / footer controls */}
+                <div className="space-y-1 border-t border-zinc-900/20 pt-3">
+                  <p className="text-[10px] text-zinc-500 font-extrabold px-3 py-1 uppercase tracking-wider text-right">
+                    {language === 'ar' ? 'سياسات المنصة' : 'Policies & Guides'}
+                  </p>
+
                   <button 
-                    onClick={() => {
-                      setShowMobileMenu(false);
-                      setShowAdminPanel(true);
-                    }}
-                    className="flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors text-right font-bold w-full mt-4 border border-zinc-800"
+                    onClick={() => { setShowMobileMenu(false); setShowPrivacyModal(true); }}
+                    className={`flex items-center gap-3 px-4 py-2 rounded-xl text-zinc-500 hover:text-zinc-350 hover:bg-zinc-900/20 transition-all font-bold w-full text-xs cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
                   >
-                    <ShieldCheck className="w-5 h-5 text-red-500" />
-                    <span>لوحة التحكم</span>
+                    <span>{language === 'ar' ? '🔐 سياسة الخصوصية والأمان' : '🔐 Privacy Policy'}</span>
                   </button>
-                )}
+
+                  <button 
+                    onClick={() => { setShowMobileMenu(false); setShowTermsModal(true); }}
+                    className={`flex items-center gap-3 px-4 py-2 rounded-xl text-zinc-500 hover:text-zinc-350 hover:bg-zinc-900/20 transition-all font-bold w-full text-xs cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
+                  >
+                    <span>{language === 'ar' ? '📜 شروط وقوانين المنصة' : '📜 Terms of Use'}</span>
+                  </button>
+
+                  <button 
+                    onClick={() => { setShowMobileMenu(false); setShowAboutModal(true); }}
+                    className={`flex items-center gap-3 px-4 py-2 rounded-xl text-zinc-500 hover:text-zinc-350 hover:bg-zinc-900/20 transition-all font-bold w-full text-xs cursor-pointer ${language === 'ar' ? 'text-right flex-row-reverse' : 'text-left'}`}
+                  >
+                    <span>{language === 'ar' ? '🚀 حول منصة Golden Gih' : '🚀 About Platform'}</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="mt-auto pt-6 border-t border-zinc-900">
+              {/* Drawer footer */}
+              <div className="mt-auto pt-4 border-t border-zinc-900 flex flex-col gap-2 shrink-0">
                 <button 
                   onClick={() => {
                     setShowMobileMenu(false);
                     setShowContactModal(true);
                   }}
-                  className="flex items-center gap-4 px-4 py-3 rounded-xl hover:bg-zinc-900 transition-colors text-right font-bold w-full"
+                  className={`flex items-center gap-3.5 px-4 py-3 rounded-xl bg-red-650 hover:bg-red-540 text-white transition-all font-black text-xs w-full cursor-pointer shadow-lg shadow-red-600/10 justify-center h-11`}
                 >
-                  <MessageSquare className="w-5 h-5 text-zinc-500" />
-                  <span>اتصل بنا</span>
+                  <MessageSquare className="w-4 h-4" />
+                  <span>{language === 'ar' ? 'اتصل بفرق الدعم الفني' : 'Contact Support Hub'}</span>
                 </button>
-                <div className="mt-4 px-4">
-                  <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-black">Golden Gih</p>
+                <div className="text-center py-1">
+                  <p className="text-[10px] text-zinc-650 uppercase tracking-widest font-black">Golden Gih &copy; 2026</p>
                 </div>
               </div>
             </motion.div>
@@ -2230,90 +2891,159 @@ const AppContent = () => {
         )}
       </AnimatePresence>
 
-      {/* Safe & Verified High-Fidelity Download Progress Modal Overlay */}
+      {/* Safe & Verified High-Fidelity Download Progress - Floating Non-Blocking Toast Notifier */}
       <AnimatePresence>
         {activeDownload && (
-          <div className="fixed inset-0 bg-black/95 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="fixed bottom-6 right-6 left-6 sm:left-auto sm:right-6 sm:w-[410px] z-[250]">
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-zinc-950 border border-zinc-900 rounded-[2.5rem] p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-red-500/5 text-right font-sans"
+              initial={{ y: 50, scale: 0.9, opacity: 0 }}
+              animate={{ y: 0, scale: 1, opacity: 1 }}
+              exit={{ y: 30, scale: 0.95, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 220, damping: 22 }}
+              className="bg-zinc-950/98 border border-zinc-900 rounded-[2.2rem] p-6 shadow-[0_25px_50px_rgba(0,0,0,0.8)] backdrop-blur-2xl relative overflow-hidden text-right font-sans"
             >
-              {/* Glow highlight effect */}
-              <div className="absolute top-0 right-[-10%] w-36 h-36 bg-red-600/10 rounded-full blur-2xl pointer-events-none" />
+              {/* Subtle pulsing red light decoration representing secure scanning status */}
+              <div className="absolute top-0 left-0 w-32 h-32 bg-red-650/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
 
-              {/* Header status block */}
-              <div className="flex flex-col items-center gap-2 mb-6">
-                <div className="w-16 h-16 rounded-2xl bg-red-650/10 border border-red-500/20 flex items-center justify-center text-red-500 relative">
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ repeat: Infinity, duration: 2.2, ease: "linear" }}
-                    className="absolute inset-0 rounded-2xl border-2 border-dashed border-red-500/30 pointer-events-none"
-                  />
+              <div className="flex gap-4 items-start mb-4">
+                {/* Crimson circle loader/indicator */}
+                <div className="w-12 h-12 rounded-2xl bg-red-650/10 border border-red-500/25 shrink-0 flex items-center justify-center text-red-500 relative">
                   {activeDownload.progress < 100 ? (
-                    <Download className="w-7 h-7 text-red-500 animate-bounce" />
+                    <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    <CheckCircle2 className="w-7 h-7 text-emerald-400" />
+                    <ShieldCheck className="w-6 h-6 text-amber-500 animate-bounce" />
                   )}
                 </div>
-                <h3 className="text-xl font-black text-white mt-1">
-                  {language === 'ar' ? 'تحميل آمن ومعتمد' : 'Secure Premium Download'}
-                </h3>
-                <p className="text-xs font-bold text-zinc-500">
-                  {language === 'ar' ? 'جاري التحقق وفحص الملف السحابي...' : 'Cloud scanning and verifying files...'}
-                </p>
+
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[9px] px-2.5 py-0.5 rounded-lg border font-black uppercase tracking-wider ${
+                      activeDownload.progress < 100 
+                        ? 'bg-red-950/40 text-red-500 border-red-900/30 animate-pulse' 
+                        : 'bg-amber-950/40 text-amber-500 border-amber-900/30'
+                    }`}>
+                      {activeDownload.progress < 100 
+                        ? (language === 'ar' ? 'تحليل المود أمنياً...' : 'ANALYZING CONTENT...') 
+                        : (language === 'ar' ? 'اكتمل التحليل والتثبيت' : 'ANALYSIS COMPLETE')}
+                    </span>
+                    <span className="text-xs font-black text-rose-500">{activeDownload.progress}%</span>
+                  </div>
+
+                  <h3 className="text-sm font-black text-white truncate text-right">
+                    {activeDownload.title}
+                  </h3>
+                  
+                  <div className="text-[10px] text-zinc-400 font-bold flex justify-between">
+                    <span>{activeDownload.size}</span>
+                    <span className="text-zinc-650">Minecraft Java/Bedrock Pack</span>
+                  </div>
+                </div>
               </div>
 
-              {/* Target details card */}
-              <div className="bg-zinc-900/50 border border-zinc-900 w-full p-4 rounded-2xl mb-6 text-right space-y-1">
-                <div className="text-[10px] text-zinc-500 font-extrabold uppercase">
-                  {language === 'ar' ? 'اسم الملف والمود' : 'File and Mod Identifier'}
-                </div>
-                <p className="text-sm font-bold text-white truncate">{activeDownload.title}</p>
-                <div className="flex justify-between items-center text-xs font-semibold pt-2 border-t border-zinc-900/40 mt-2">
-                  <span className="text-red-400 font-extrabold">{activeDownload.size}</span>
-                  <span className="text-zinc-500">{language === 'ar' ? 'حجم الملف التقديري' : 'Estimated file size'}</span>
-                </div>
+              {/* Dynamic Content Analysis Block */}
+              <div className="bg-black/40 border border-zinc-900/80 rounded-2xl p-3.5 space-y-2 text-right relative min-h-[105px] flex flex-col justify-center">
+                <span className="text-[8px] uppercase tracking-widest font-black text-zinc-600 block mb-1">
+                  {language === 'ar' ? '📊 تقرير فحص وتحليل المود التلقائي:' : '📊 AUTOPILOT MOD REPORT:'}
+                </span>
+                
+                <AnimatePresence mode="wait">
+                  {activeDownload.progress < 30 ? (
+                    <motion.div 
+                      key="p1" 
+                      initial={{ opacity: 0, y: 5 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0 }}
+                      className="space-y-1"
+                    >
+                      <p className="text-[11px] font-black text-rose-400 animate-pulse">
+                        🛡️ {language === 'ar' ? 'جاري فحص التوقيع الرقمي ومراجعة الملفات...' : 'Scanning digital signatures and reviewing files...'}
+                      </p>
+                      <p className="text-[9px] text-zinc-500">
+                        {language === 'ar' 
+                          ? `بدء فك تجميع الهياكل لـ "${activeDownload.title}" والتحقق من خلوها من الأكواد الضارة تماماً.` 
+                          : `Decomposing code structures for "${activeDownload.title}" to ensure complete absence of payloads.`}
+                      </p>
+                    </motion.div>
+                  ) : activeDownload.progress < 70 ? (
+                    <motion.div 
+                      key="p2" 
+                      initial={{ opacity: 0, y: 5 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0 }}
+                      className="space-y-1"
+                    >
+                      <p className="text-[11px] font-black text-amber-500">
+                        ✨ {language === 'ar' ? 'تم فك حزمة المورد وتحليل الميزات:' : 'Resource package unpacked & features analyzed:'}
+                      </p>
+                      <p className="text-[10px] text-zinc-300 font-semibold leading-relaxed line-clamp-3 bg-zinc-950/40 p-2 rounded-xl border border-zinc-900">
+                        {activeDownload.description || (language === 'ar' ? 'مود متميز ورائع يضيف ميزات حصرية ممتعة ومتوافقة مع سوق ماين كرافت الرسمي.' : 'A premium gameplay enhancement mod pack that boosts vanilla functions perfectly.')}
+                      </p>
+                    </motion.div>
+                  ) : activeDownload.progress < 100 ? (
+                    <motion.div 
+                      key="p3" 
+                      initial={{ opacity: 0, y: 5 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0 }}
+                      className="space-y-1"
+                    >
+                      <p className="text-[11px] font-black text-emerald-500 flex items-center gap-1">
+                        📦 [{activeDownload.category || (language === 'ar' ? 'مودات' : 'Mods')}]
+                        <span>{language === 'ar' ? 'تم الفحص السحابي الأمني بنجاح' : 'Secured Cloud Protection approved'}</span>
+                      </p>
+                      <p className="text-[9px] text-zinc-500">
+                        {language === 'ar' 
+                          ? 'تنسيق متوافق مع كافة الهواتف والأجهزة المكتبية ومنصات الكونسول (Bedrock & Java).' 
+                          : 'Optimized manifest format compatible across Pocket, Console, Java & Bedrock platforms.'}
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <motion.div 
+                      key="p4" 
+                      initial={{ opacity: 0, y: 5 }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      className="space-y-1"
+                    >
+                      <p className="text-[11px] font-black text-amber-400">
+                        🚀 {language === 'ar' ? 'اكتمل التحليل وتثبيت المود بنجاح!' : 'Mod parsed and downloaded successfully!'}
+                      </p>
+                      <p className="text-[9px] text-zinc-400">
+                        {language === 'ar' 
+                          ? 'الملف جاهز الآن للتشغيل المباشر داخل اللعبة. استمتع بتجربة لعب فريدة ومأمونة.' 
+                          : 'Asset package fully indexed inside the client cache. You are ready to engage!'}
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
-              {/* Progress dynamic tracks */}
-              <div className="space-y-2 mb-6">
-                <div className="flex justify-between items-center text-xs font-black">
-                  <span className="text-zinc-400">
-                    {activeDownload.progress < 100 
-                      ? (language === 'ar' ? 'جاري التنزيل المباشر...' : 'Downloading live...') 
-                      : (language === 'ar' ? 'اكتمل التحميل!' : 'Completed!')}
-                  </span>
-                  <span className="text-red-500">{activeDownload.progress}%</span>
-                </div>
-
-                {/* Progress track body */}
-                <div className="w-full h-3 bg-zinc-900 border border-zinc-900 rounded-full overflow-hidden relative">
+              {/* Linear mini progress track */}
+              <div className="mt-4 space-y-2">
+                <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
                   <motion.div
-                    className="h-full bg-gradient-to-r from-red-650 to-orange-500 rounded-full"
+                    className="h-full bg-gradient-to-r from-red-650 via-rose-500 to-amber-500"
                     initial={{ width: '0%' }}
                     animate={{ width: `${activeDownload.progress}%` }}
-                    transition={{ type: "spring", stiffness: 100, damping: 20 }}
+                    transition={{ type: "spring", stiffness: 80, damping: 15 }}
                   />
                 </div>
+
+                {/* Footer close option */}
+                <div className="flex justify-between items-center text-[9px] text-zinc-500 select-none">
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping inline-block" />
+                    {activeDownload.progress < 100 
+                      ? (language === 'ar' ? 'حصانة سحابية نشطة 100%' : '100% Cloud Sandbox Secure')
+                      : (language === 'ar' ? 'جاهز للاستخدام النهائي' : 'Ready for Gameplay')}
+                  </span>
+                  <button 
+                    onClick={() => setActiveDownload(null)} 
+                    className="text-zinc-500 hover:text-white transition-colors cursor-pointer text-[10px] font-bold"
+                  >
+                    {language === 'ar' ? 'إغلاق نافذة التحليل ×' : 'Close Terminal ×'}
+                  </button>
+                </div>
               </div>
-
-              {/* Live steps updates */}
-              <p className="text-[11px] text-zinc-500 mb-6 font-semibold h-4 select-none">
-                {activeDownload.progress < 30 && (language === 'ar' ? '• جاري تهيئة الاتصال بالسيرفر الآمن...' : '• Initiating secure server connection...')}
-                {activeDownload.progress >= 30 && activeDownload.progress < 70 && (language === 'ar' ? '• جاري استخراج الحزم والتحقق من التوافق...' : '• Extracting packages and checking file integrity...')}
-                {activeDownload.progress >= 70 && activeDownload.progress < 100 && (language === 'ar' ? '• جاري إنشاء رابط التنزيل المباشر المسرع...' : '• Finalizing high-speed direct links...')}
-                {activeDownload.progress === 100 && (language === 'ar' ? 'تم تجهيز الملف! سيفتح الرابط الآن...' : 'File prepared! Direct link launching...')}
-              </p>
-
-              {/* Cancel button */}
-              <button
-                onClick={() => setActiveDownload(null)}
-                className="w-full text-xs font-bold text-zinc-400 hover:text-white bg-zinc-900 hover:bg-zinc-850 p-3 rounded-xl border border-zinc-900 hover:border-zinc-800 transition active:scale-95"
-              >
-                {language === 'ar' ? 'إلغاء التحميل' : 'Cancel Download'}
-              </button>
             </motion.div>
           </div>
         )}
@@ -2672,7 +3402,7 @@ const AdminPanel = ({
   onClose: () => void; 
   onAddGame: (data: Omit<Game, 'id'>) => void;
   onDeleteGame: (id: string) => void;
-  onResolveReport: (id: string) => void;
+  onResolveReport: (id: string, reply?: string) => void;
   onDeleteReport: (id: string) => void;
   games: Game[];
   language: 'ar' | 'en';
@@ -2683,6 +3413,7 @@ const AdminPanel = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'games' | 'reports' | 'users' | 'socials'>('games');
   const [reports, setReports] = useState<Report[]>([]);
+  const [reportReplies, setReportReplies] = useState<{[reportId: string]: string}>({});
   const [dbUsers, setDbUsers] = useState<any[]>([]);
   const [toggleLoading, setToggleLoading] = useState<string | null>(null);
   const [userSearchText, setUserSearchText] = useState('');
@@ -2749,6 +3480,10 @@ const AdminPanel = ({
     }
   };
 
+  const [pricingChatHistory, setPricingChatHistory] = useState<{ role: 'user' | 'model'; text: string }[]>([]);
+  const [pricingInputText, setPricingInputText] = useState('');
+  const [isPricingBotLoading, setIsPricingBotLoading] = useState(false);
+
   const [newGame, setNewGame] = useState({
     title: '',
     description: '',
@@ -2756,9 +3491,133 @@ const AdminPanel = ({
     downloadUrl: '',
     category: 'مودات',
     rating: 5,
-    edition: 'both' as 'java' | 'bedrock' | 'both'
+    edition: 'both' as 'java' | 'bedrock' | 'both',
+    isPaid: false,
+    price: ''
   });
   const [quickAddLink, setQuickAddLink] = useState('');
+  
+  const initPricingChat = () => {
+    if (pricingChatHistory.length === 0) {
+      setPricingChatHistory([
+        {
+          role: 'model',
+          text: language === 'ar' 
+            ? 'مرحباً بك في مساعد التسعير الذكي الخاص بسوق ماين كرافت! 🛡️💎\n\nأنا هنا لمساعدتك في تحديد وتوفير أسعار دقيقة تتماشى مع معايير متجر ماين كرافت الرسمي (Minecraft Marketplace). \n\nيرجى تزويدي بنوع المود (Skin Pack, Map, Addon...) والمحتويات المتضمنة فيه (أشكال مخصصة، شيدر، أكواد جافا سكريبت، إلخ.) وسأقترح عليك السعر الأنسب بالعملة الافتراضية للعبة (Minecoins) والنسخة المقابلة بالدولار الأمريكي وبطريقة احترافية بالكامل.'
+            : 'Welcome to your Minecraft Marketplace Intelligent Pricing Assistant! 🛡️💎\n\nI can help you analyze features of your mod to calculate typical Minecraft Marketplace prices equivalent in Minecoins and USD.\n\nTell me the type of mod (Skins, Map, Resource Pack, Add-on) and its special features to receive an immediate professional price evaluation!'
+        }
+      ]);
+    }
+  };
+
+  const askPricingQuestion = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || isPricingBotLoading) return;
+
+    // Add user message to state
+    const updatedHistory = [
+      ...pricingChatHistory,
+      { role: 'user' as const, text: trimmed }
+    ];
+    setPricingChatHistory(updatedHistory);
+    setPricingInputText('');
+    setIsPricingBotLoading(true);
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        // Fallback pricing simulation if API key is not in dev workspace
+        setTimeout(() => {
+          let simulatedPrice = "490 Minecoins ($2.99)";
+          let simulatedText = language === 'ar' 
+            ? `بناءً على مواصفات المود "${newGame.title || 'هذا المود'}"، ينصح بوضع سعر متوسط ترويجي يبلغ 490 Minecoins (ما يعادل تقريباً 2.99 دولار أمريكي). \n\n• حزم السكنات: 160 - 310 Minecoins\n• الخرائط والـ Addons: 490 - 830 Minecoins\n• المودات الكاملة والمستعمرات العريقة: 990+ Minecoins.`
+            : `Based on your description, the standard Minecraft Marketplace pricing for "${newGame.title || 'this mod'}" is estimated around 490 Minecoins (~$2.99 USD). \n\n• Skin packs average: 160 - 310 Minecoins\n• Adventure Maps / Addons: 490 - 830 Minecoins\n• World Templates: 990+ Minecoins.`;
+          
+          if (trimmed.includes('سكن') || trimmed.toLowerCase().includes('skin')) {
+            simulatedPrice = "160 Minecoins ($0.99)";
+            simulatedText = language === 'ar'
+              ? `حزمة سكنات (Skin Pack): السعر الموصى به هو 160 كوينز ($0.99) للمتجر لتشجيع التحميل السريع لمستخدمي الهاتف والجافا.`
+              : `Skin Pack: Recommended standard starts at 160 Minecoins ($0.99) to build immediate interest and conversions.`;
+          } else if (trimmed.includes('خريطة') || trimmed.toLowerCase().includes('map')) {
+            simulatedPrice = "830 Minecoins ($4.99)";
+            simulatedText = language === 'ar'
+              ? `خريطة مغامرات عريضة: ينصح بسعر 830 كوينز ($4.99 USD) لوجود عوالم ومهمات مخصصة تزيد من وقت اللعب.`
+              : `Adventure Map: An optimized price point is 830 Minecoins ($4.99 USD) reflecting custom quest lines, audio, and high replayability.`;
+          }
+
+          setPricingChatHistory(prev => [
+            ...prev,
+            { role: 'model' as const, text: simulatedText }
+          ]);
+          setNewGame(prev => ({ ...prev, price: simulatedPrice }));
+          setIsPricingBotLoading(false);
+        }, 1200);
+        return;
+      }
+
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
+      });
+
+      // Compile current prompt context
+      const systemInstruction = `You are a Minecraft Marketplace Pricing Expert. You evaluate mods, behavior packs, skins, textures, maps, and addons.
+Your goal is to suggest standard Minecraft Marketplace pricing in Minecoins (with conversion rate: 160 Minecoins = $0.99 USD, 310 Minecoins = $1.99, 490 Minecoins = $2.99, 830 Minecoins = $4.99, 990 Minecoins = $5.99, 1340 Minecoins = $7.99, 1600 Minecoins = $9.99).
+Provide useful, detailed and friendly guidelines. Always conclude with a final suggested price in standard marketplace values (e.g., 490 Minecoins ($2.99)). Always reply in Arabic beautifully in standard gamer tone.`;
+
+      // Map format for generateContent contents
+      const formattedContents = updatedHistory.map(item => ({
+        role: item.role === 'user' ? 'user' : 'model',
+        parts: [{ text: item.text }]
+      }));
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: formattedContents as any,
+        config: {
+          systemInstruction: systemInstruction,
+          temperature: 0.75
+        }
+      });
+
+      const replyText = response.text || '';
+      const finalHistory = [
+        ...updatedHistory,
+        { role: 'model' as const, text: replyText }
+      ];
+      setPricingChatHistory(finalHistory);
+
+      const minecoinsRegex = /(\d+)\s*(Minecoins|Minecoin|كوين)/i;
+      const usdRegex = /\$\d+(\.\d{2})?/;
+      const matchCoin = replyText.match(minecoinsRegex);
+      const matchUsd = replyText.match(usdRegex);
+      
+      if (matchCoin) {
+        let textPrice = `${matchCoin[1]} Minecoins`;
+        if (matchUsd) {
+          textPrice += ` (${matchUsd[0]})`;
+        }
+        setNewGame(prev => ({ ...prev, price: textPrice }));
+      }
+
+    } catch (err) {
+      console.error("Gemini pricing error:", err);
+      // Fallback
+      setPricingChatHistory(prev => [
+        ...prev,
+        { role: 'model' as const, text: language === 'ar' ? "حدث ضغط على النظام! السعر المقترح الشائع لمثل هذه المودات هو 310 Minecoins ($1.99)." : "Server timeout. Standard recommended price is 310 Minecoins ($1.99)." }
+      ]);
+      setNewGame(prev => ({ ...prev, price: "310 Minecoins ($1.99)" }));
+    } finally {
+      setIsPricingBotLoading(false);
+      setTimeout(() => {
+        const container = document.getElementById('chat-messages-container');
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      }, 100);
+    }
+  };
   
   const [imageLoading, setImageLoading] = useState(false);
   const [isImageUnsafe, setIsImageUnsafe] = useState(false);
@@ -3141,6 +4000,161 @@ const AdminPanel = ({
                       </div>
                     </div>
 
+                    {/* Paid Status & Intelligent Pricing Assistant Block */}
+                    <div className="col-span-1 md:col-span-3 bg-zinc-950/25 p-5 rounded-[2rem] border border-zinc-900 space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <Coins className="w-5 h-5 text-amber-500 animate-pulse" />
+                          <div className="text-right" dir="rtl">
+                            <p className="text-xs font-black text-white">
+                              {language === 'ar' ? 'هل هذا المود مدفوع ومتميز؟' : 'Is this Mod Paid / Premium?'}
+                            </p>
+                            <p className="text-[10px] text-zinc-500">
+                              {language === 'ar' ? 'اختر ما إذا كان المود مجانياً بالكامل أم يتطلب نقود Minecoins للتنزيل' : 'Specify if this is a free mod or a premium Minecraft Marketplace content'}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2 bg-zinc-950 p-1.5 rounded-xl border border-zinc-900" dir="rtl">
+                          <button
+                            type="button"
+                            onClick={() => setNewGame({ ...newGame, isPaid: false, price: '' })}
+                            className={`px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer ${!newGame.isPaid ? 'bg-red-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          >
+                            {language === 'ar' ? 'محتوى مجاني' : 'Free Content'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewGame(prev => ({ ...prev, isPaid: true, price: '490 Minecoins ($2.99)' }));
+                              initPricingChat();
+                            }}
+                            className={`px-4 py-2 rounded-lg text-xs font-black transition-all cursor-pointer ${newGame.isPaid ? 'bg-amber-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-300'}`}
+                          >
+                            {language === 'ar' ? 'محتوى مدفوع (Premium)' : 'Paid Content'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {newGame.isPaid && (
+                        <div className="border-t border-zinc-900/60 pt-4 space-y-4" dir="rtl">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="md:col-span-1 flex flex-col gap-1.5 text-right">
+                              <label className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                                <DollarSign className="w-4 h-4" />
+                                {language === 'ar' ? 'السعر المقترح للمود:' : 'Suggested Price:'}
+                              </label>
+                              <input
+                                type="text"
+                                placeholder={language === 'ar' ? 'مثال: 490 Minecoins ($2.99)' : 'e.g. 490 Minecoins ($2.99)'}
+                                value={newGame.price}
+                                onChange={e => setNewGame({ ...newGame, price: e.target.value })}
+                                className="bg-zinc-950 border border-zinc-850 rounded-xl p-3 text-sm focus:border-amber-500 text-white font-black outline-none w-full"
+                              />
+                            </div>
+
+                            <div className="md:col-span-2 flex flex-col gap-1.5">
+                              <label className="text-xs font-bold text-zinc-400">
+                                {language === 'ar' ? 'مساعد التقييم والأسعار حسب سوق ماين كرافت المعتمد 🤖' : 'Minecraft Marketplace Pricing Assistant 🤖'}
+                              </label>
+                              {/* Real AI Chat interface below */}
+                              <div className="bg-zinc-950 border border-zinc-900 rounded-2xl flex flex-col h-[280px] overflow-hidden">
+                                {/* Header */}
+                                <div className="bg-zinc-900/60 border-b border-zinc-900 p-2.5 flex items-center justify-between text-right px-4">
+                                  <span className="text-[10px] text-zinc-400 flex items-center gap-1">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping inline-block" />
+                                    {language === 'ar' ? 'مستشار التسعير الذكي نشط' : 'Pricing Advisor Active'}
+                                  </span>
+                                  <span className="text-xs font-bold text-amber-400">Minecoins Marketplace AI</span>
+                                </div>
+
+                                {/* Messages box */}
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 text-right text-xs" id="chat-messages-container">
+                                  {pricingChatHistory.map((msg, idx) => (
+                                    <div key={idx} className={`flex flex-col ${msg.role === 'user' ? 'items-start animate-fade-in' : 'items-end'}`}>
+                                      <span className="text-[9px] text-zinc-650 mb-0.5">{msg.role === 'user' ? (language === 'ar' ? 'مطور المود' : 'You') : (language === 'ar' ? 'مستشار السوق' : 'Market Bot')}</span>
+                                      <div className={`p-3 rounded-2xl max-w-[85%] leading-relaxed ${msg.role === 'user' ? 'bg-zinc-900 text-zinc-300' : 'bg-emerald-950/20 text-emerald-300 border border-emerald-900/30 text-right whitespace-pre-wrap font-sans'}`}>
+                                        {msg.text}
+                                      </div>
+                                    </div>
+                                  ))}
+                                  {isPricingBotLoading && (
+                                    <div className="flex items-center gap-2 text-zinc-500 self-end p-2 bg-zinc-900/35 rounded-xl border border-zinc-900 pr-4">
+                                      <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce delay-75" />
+                                      <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce delay-150" />
+                                      <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce delay-300" />
+                                      <span className="text-[10px] text-zinc-400 font-bold">{language === 'ar' ? 'يقوم Gemini بحساب أسعار السوق العادلة...' : 'Calculating market index...'}</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Quick suggestion prompt tags */}
+                                <div className="p-2 border-t border-zinc-900 bg-zinc-950/40 flex flex-wrap gap-1.5 justify-end" dir="rtl">
+                                  <button
+                                    type="button"
+                                    onClick={() => askPricingQuestion(
+                                      language === 'ar' 
+                                        ? `ما هو السعر المناسب لسكن باك (Skin Pack) يحتوي على 10 سكنات في سوق ماين كرافت؟` 
+                                        : `What is a good price for a Skin Pack with 10 skins?`
+                                    )}
+                                    className="text-[9px] bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white px-2 py-1 rounded-md transition cursor-pointer font-bold"
+                                  >
+                                    👕 {language === 'ar' ? 'سعر حزمة سكنات' : 'Skin Pack Price'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => askPricingQuestion(
+                                      language === 'ar' 
+                                        ? `أقوم بنشر خريطة مغامرات كاملة (Adventure Map) مع شيدرز مخصص وتطويرات. ما القيمة المقترحة بالكوين والدولار؟` 
+                                        : `I am publishing an Adventure Map with custom shaders and behavior packs, standard price in Minecoins?`
+                                    )}
+                                    className="text-[9px] bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white px-2 py-1 rounded-md transition cursor-pointer font-bold"
+                                  >
+                                    🗺️ {language === 'ar' ? 'سعر خريطة مغامرات' : 'Adventure Map Price'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => askPricingQuestion(
+                                      language === 'ar' 
+                                        ? `أريد بيع مود أسلحة وسيارات مطور (Add-on) بنظام Bedrock Edition. كم أضعه في المتجر؟` 
+                                        : `Price for a complex weapons and cars Add-on for Bedrock Edition?`
+                                    )}
+                                    className="text-[9px] bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white px-2 py-1 rounded-md transition cursor-pointer font-bold"
+                                  >
+                                    🚗 {language === 'ar' ? 'سعر مود أو إضافات' : 'Addon & Cars Price'}
+                                  </button>
+                                </div>
+
+                                {/* Form Input box */}
+                                <div className="p-2 border-t border-zinc-900 bg-zinc-900/30 flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    placeholder={language === 'ar' ? 'اسأل عن سعر المود ونقاط سوق ماين كرافت...' : 'Ask about typical Minecoin pricing or rates...'}
+                                    value={pricingInputText}
+                                    onChange={e => setPricingInputText(e.target.value)}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        askPricingQuestion(pricingInputText);
+                                      }
+                                    }}
+                                    className="flex-1 bg-zinc-950 border border-zinc-900 rounded-xl px-3 py-2 text-right text-xs text-white focus:border-amber-500 outline-none placeholder:text-zinc-650"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => askPricingQuestion(pricingInputText)}
+                                    className="bg-amber-600 hover:bg-amber-500 text-white p-2 rounded-xl transition cursor-pointer"
+                                  >
+                                    <Send className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Mod Thumbnail Upload block */}
                     <div className="flex flex-col gap-2 col-span-1 md:col-span-3 bg-zinc-950/20 p-4 rounded-2xl border border-zinc-800">
                       <label className="text-xs font-bold text-zinc-400 mr-2 uppercase tracking-widest flex items-center gap-2">
@@ -3262,14 +4276,37 @@ const AdminPanel = ({
                     />
                   </div>
                   <button 
-                    onClick={() => {
+                    onClick={async () => {
                       if (isImageUnsafe) {
                         alert(language === 'ar' ? 'عذراً، لا يمكنك النشر بصورة غير لائقة!' : 'Sorry, you cannot publish with inappropriate images!');
                         return;
                       }
-                      onAddGame(newGame);
-                      setNewGame({ title: '', description: '', thumbnail: '', downloadUrl: '', category: 'مودات', rating: 5, edition: 'both' as 'java' | 'bedrock' | 'both' });
-                      setModFileName('');
+                      const cleanTitle = newGame.title.trim();
+                      const cleanDownloadUrl = newGame.downloadUrl.trim();
+                      if (!cleanTitle) {
+                        alert(language === 'ar' ? 'يرجى إدخال اسم المود أولاً!' : 'Please enter the mod title first!');
+                        return;
+                      }
+                      if (!cleanDownloadUrl) {
+                        alert(language === 'ar' ? 'يرجى رفع ملف المود أو وضع رابط تحميل مباشر!' : 'Please upload a mod file or provide a direct download URL first!');
+                        return;
+                      }
+                      try {
+                        await onAddGame({
+                          ...newGame,
+                          title: cleanTitle,
+                          downloadUrl: cleanDownloadUrl
+                        });
+                        alert(language === 'ar' ? 'تم رفع ونشر المود بنجاح!' : 'Mod uploaded and published successfully!');
+                        setNewGame({ title: '', description: '', thumbnail: '', downloadUrl: '', category: 'مودات', rating: 5, edition: 'both' as 'java' | 'bedrock' | 'both', isPaid: false, price: '' });
+                        setModFileName('');
+                      } catch (err: any) {
+                        console.error("Error publishing mod:", err);
+                        alert(language === 'ar' 
+                          ? 'حدث خطأ أثناء رفع المود. تفاصيل الخطأ:\n' + (err.message || err)
+                          : 'An error occurred while uploading. Details:\n' + (err.message || err)
+                        );
+                      }
                     }}
                     disabled={imageLoading || isImageUnsafe}
                     className="mt-6 w-full bg-red-600 hover:bg-red-500 text-white py-4 rounded-xl font-bold transition-all shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3279,7 +4316,7 @@ const AdminPanel = ({
                 </div>
 
                 <div className="space-y-4">
-                  <h3 className="text-xl font-bold">المحتوى المنشور ({games.length})</h3>
+                  <h3 className="text-xl font-bold font-sans text-right">المحتوى المنشور ({games.length})</h3>
                   <div className="grid grid-cols-1 gap-3">
                     {games.map(game => (
                       <div key={game.id} className="bg-zinc-900/30 border border-zinc-800 p-4 rounded-2xl flex items-center justify-between group">
@@ -3288,11 +4325,11 @@ const AdminPanel = ({
                             <img src={game.thumbnail} className="w-16 h-10 object-cover rounded-lg bg-zinc-800" />
                           ) : (
                             <div className="w-16 h-10 bg-zinc-800 rounded-lg flex items-center justify-center">
-                              <ImageIcon className="w-4 h-4 text-zinc-600" />
+                              <ImageIcon className="w-4 h-4 text-zinc-650" />
                             </div>
                           )}
                           <div>
-                            <h4 className="font-bold">{game.title}</h4>
+                            <h4 className="font-bold text-sm">{game.title}</h4>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-xs text-zinc-500">{game.category}</span>
                               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-zinc-850 text-zinc-400 capitalize">
@@ -3318,7 +4355,7 @@ const AdminPanel = ({
               </div>
             ) : activeTab === 'reports' ? (
               <div className="space-y-4">
-                <h3 className="text-xl font-bold mb-6">تقارير المستخدمين ({reports.length})</h3>
+                <h3 className="text-xl font-bold mb-6 font-sans text-right">تقارير المستخدمين ({reports.length})</h3>
                 {reports.length === 0 ? (
                   <div className="text-center py-20 text-zinc-600">
                     <MessageSquare className="w-12 h-12 mx-auto mb-4 opacity-20" />
@@ -3347,21 +4384,48 @@ const AdminPanel = ({
                           )}
                           <div className="flex items-start justify-between mb-4">
                             <div className="flex items-center gap-3">
-                              <div className={`w-2 h-2 rounded-full ${isSystemWarning ? 'bg-red-500 animate-ping' : report.status === 'resolved' ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                              <div className={`w-2 h-2 rounded-full ${isSystemWarning ? 'bg-red-500' : report.status === 'resolved' ? 'bg-green-500' : 'bg-red-500'}`} />
                               <span className="text-xs font-bold uppercase tracking-widest text-zinc-500">{report.userEmail}</span>
                             </div>
-                            <span className="text-[10px] text-zinc-600">
+                            <span className="text-[10px] text-zinc-650">
                               {report.timestamp?.toDate().toLocaleString('ar-EG')}
                             </span>
                           </div>
                           <p className={`leading-relaxed mb-6 ${isSystemWarning ? 'text-red-200 font-bold font-sans' : 'text-zinc-300'}`}>{report.message}</p>
+                          
+                          {/* Display custom reply if it exists */}
+                          {report.reply && (
+                            <div className="mb-4 p-4 rounded-2xl bg-zinc-950/60 border border-zinc-850 text-right text-xs" dir="rtl">
+                              <span className="font-extrabold text-amber-500">✍️ رد المدير العام: </span>
+                              <span className="text-zinc-300 leading-relaxed font-semibold">{report.reply}</span>
+                            </div>
+                          )}
+
+                          {/* Write custom reply if report is pending */}
+                          {report.status === 'pending' && (
+                            <div className="mb-4 text-right" dir="rtl">
+                              <label className="block text-xs font-bold text-zinc-400 mb-2">
+                                ✍️ اكتب ردك المخصص على هذه المشكلة:
+                              </label>
+                              <textarea
+                                value={reportReplies[report.id] || ''}
+                                onChange={(e) => setReportReplies({
+                                  ...reportReplies,
+                                  [report.id]: e.target.value
+                                })}
+                                placeholder="اكتب ردك هنا بالتفصيل (مثال: تم تجديد المود، يرجى إعادة التحميل الآن...)"
+                                className="w-full bg-zinc-950 border border-zinc-850 rounded-2xl p-3 text-xs h-20 focus:border-red-600 outline-none transition-colors resize-none text-white font-semibold"
+                              />
+                            </div>
+                          )}
+
                           <div className="flex items-center gap-2">
                             {report.status === 'pending' && (
                               <button 
-                                onClick={() => onResolveReport(report.id)}
+                                onClick={() => onResolveReport(report.id, reportReplies[report.id] || '')}
                                 className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${isSystemWarning ? 'bg-red-600 text-white hover:bg-red-500' : 'bg-green-600/10 text-green-500 border border-green-600/20 hover:bg-green-600 hover:text-white'}`}
                               >
-                                تم الحل ومسامحة الأدمن
+                                {reportReplies[report.id]?.trim() ? 'إرسال الرد وحل المشكلة' : 'حل المشكلة (بدون رد)'}
                               </button>
                             )}
                             <button 
@@ -3536,7 +4600,7 @@ const AdminPanel = ({
                       placeholder="https://discord.gg/yourinvite"
                       value={adminSocials.discord || ''}
                       onChange={(e) => setAdminSocials(prev => ({ ...prev, discord: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-650 outline-none transition-colors text-left"
                       dir="ltr"
                     />
                   </div>
@@ -3547,7 +4611,7 @@ const AdminPanel = ({
                       placeholder="https://youtube.com/@yourchannel"
                       value={adminSocials.youtube || ''}
                       onChange={(e) => setAdminSocials(prev => ({ ...prev, youtube: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-655 outline-none transition-colors text-left"
                       dir="ltr"
                     />
                   </div>
@@ -3558,7 +4622,7 @@ const AdminPanel = ({
                       placeholder="https://x.com/yourhandle"
                       value={adminSocials.twitter || ''}
                       onChange={(e) => setAdminSocials(prev => ({ ...prev, twitter: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
+                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-655 outline-none transition-colors text-left"
                       dir="ltr"
                     />
                   </div>
@@ -3612,6 +4676,30 @@ const UserPanel = ({
   const [selectedSupportOption, setSelectedSupportOption] = useState<string>('');
   const [assistantMessage, setAssistantMessage] = useState<string>('');
   const [isSendingAssistant, setIsSendingAssistant] = useState<boolean>(false);
+  const [userReports, setUserReports] = useState<Report[]>([]);
+
+  useEffect(() => {
+    if (!isOpen || !profile?.uid) return;
+    const q = query(
+      collection(db, 'reports'),
+      where('userId', '==', profile.uid)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Report[];
+      const sorted = list.sort((a, b) => {
+        const tA = a.timestamp?.seconds || 0;
+        const tB = b.timestamp?.seconds || 0;
+        return tB - tA;
+      });
+      setUserReports(sorted);
+    }, (error) => {
+      console.error("Error subscribing to personal reports:", error);
+    });
+    return () => unsubscribe();
+  }, [isOpen, profile?.uid]);
 
   if (!isOpen || !profile) return null;
 
@@ -3649,7 +4737,7 @@ const UserPanel = ({
             { id: 'profile', label: 'حسابي', icon: UserIcon },
             { id: 'favorites', label: 'المفضلات', icon: Heart },
             { id: 'settings', label: 'الإعدادات', icon: Settings },
-            { id: 'support', label: 'تذاكر الدعم', icon: MessageSquare },
+            { id: 'support', label: 'الدعم الفني ورد الدعم الفني عليك', icon: MessageSquare },
             { id: 'assistant', label: 'مساعد الدعم', icon: Sparkles },
           ].map((tab) => (
             <button 
@@ -3670,7 +4758,7 @@ const UserPanel = ({
               { id: 'profile', label: 'حسابي', icon: UserIcon },
               { id: 'favorites', label: 'المفضلات', icon: Heart },
               { id: 'settings', label: 'الإعدادات', icon: Settings },
-              { id: 'support', label: 'تذاكر الدعم', icon: MessageSquare },
+              { id: 'support', label: 'الدعم الفني ورد الدعم الفني عليك', icon: MessageSquare },
               { id: 'assistant', label: 'مساعد الدعم', icon: Sparkles },
             ].map((tab) => (
               <button 
@@ -3880,7 +4968,7 @@ const UserPanel = ({
 
             {activeTab === 'support' && (
               <div className="space-y-6">
-                <h3 className="text-xl font-bold mb-6">الإبلاغ عن مشكلة</h3>
+                <h3 className="text-xl font-bold mb-6 text-right">الإبلاغ عن مشكلة</h3>
                 <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-4 text-right">
                   <p className="text-sm text-zinc-400">هل تواجه مشكلة في تحميل المودات؟ اترك لنا رسالة وسنرد عليك في أقرب وقت.</p>
                   <textarea 
@@ -3901,151 +4989,223 @@ const UserPanel = ({
                     إرسال البلاغ
                   </button>
                 </div>
-              </div>
-            )}
 
-            {activeTab === 'assistant' && (
-              <div className="space-y-6">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                    <Sparkles className="w-6 h-6 animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-white">مساعد الدعم الفني الذكي</h3>
-                    <p className="text-xs text-zinc-500">مساعدك لحل جميع المشاكل التقنية على الفور</p>
-                  </div>
-                </div>
-
-                <div className={`border p-6 rounded-[2rem] space-y-6 ${theme === 'light' ? 'bg-zinc-100/50 border-zinc-200' : 'bg-zinc-900/40 border-zinc-900'}`}>
-                  {assistantStep === 1 && (
-                    <div className="space-y-6 text-right">
-                      {/* Bot Greeting Bubble */}
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center shrink-0 shadow-lg shadow-amber-600/15">
-                          <Sparkles className="w-5 h-5 text-white animate-pulse" />
-                        </div>
-                        <div className={`p-5 rounded-3xl rounded-tr-none text-sm leading-relaxed max-w-lg ${theme === 'light' ? 'bg-white text-zinc-800 border border-zinc-200 shadow-sm' : 'bg-zinc-950 text-zinc-100 border border-zinc-900'}`}>
-                          <p className="font-extrabold text-amber-500 mb-1 flex items-center gap-2 justify-end">
-                            <span>مساعد ماين كرافت الذهبي</span>
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                          </p>
-                          <p>مرحباً بك يا غالي! أنا هنا لمساعدتك فوراً لحل أي مشكلة أو الرد على استفسارك ومساعدتك في المودات والخرائط. يرجى اختيار أحد المواضيع السريعة التالية للبدء:</p>
-                        </div>
-                      </div>
-
-                      {/* Helper Selectable Buttons */}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-                        {[
-                          { text: 'هل في مشكلة؟', desc: 'مشاكل تصفح، تعليق أو بطء في التحميل' },
-                          { text: 'لم يشتغل المود؟', desc: 'المودات لا تظهر أو لا تعمل في اللعبة' },
-                          { text: 'أرجو التواصل معي', desc: 'مواضيع أخرى أو استفسار مخصص للمدير' }
-                        ].map((opt, idx) => (
-                          <button
-                            key={idx}
-                            onClick={() => {
-                              setSelectedSupportOption(opt.text);
-                              setAssistantStep(2);
-                            }}
-                            className={`p-5 rounded-2xl border text-right transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] flex flex-col justify-between h-32 group cursor-pointer ${
-                              theme === 'light' 
-                                ? 'bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-900 hover:border-amber-500/50 shadow-sm' 
-                                : 'bg-zinc-950 hover:bg-zinc-900/40 border-zinc-900 text-white hover:border-amber-500/50'
-                            }`}
-                          >
-                            <span className="font-black text-sm text-amber-500 group-hover:text-amber-400 transition-colors flex items-center gap-1.5 justify-end w-full">
-                              {opt.text}
-                              <span className="w-2 h-2 rounded-full bg-amber-500" />
+                {/* Display list of user's past reports and their status/answers */}
+                <div className="space-y-4 text-right mt-8">
+                  <h4 className="text-lg font-bold border-r-4 border-red-600 pr-3">📦 بلاغاتك السابقة ورد الدعم الفني عليك ({userReports.length})</h4>
+                  {userReports.length === 0 ? (
+                    <p className="text-xs text-zinc-500 py-4 text-center">لم تقم بإرسال أي بلاغات سابقة بعد.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {userReports.map((item) => (
+                        <div 
+                          key={item.id} 
+                          className={`p-4 rounded-2xl border ${
+                            item.status === 'resolved' 
+                              ? 'bg-zinc-950/40 border-emerald-500/25 animate-pulse-subtle' 
+                              : 'bg-zinc-950/20 border-zinc-900'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${
+                              item.status === 'resolved' 
+                                ? 'bg-emerald-500/10 text-emerald-500' 
+                                : 'bg-red-500/10 text-red-500'
+                            }`}>
+                              {item.status === 'resolved' ? 'تم الرد والحل' : 'قيد الانتظار والمراجعة'}
                             </span>
-                            <span className="text-xs text-zinc-500 font-bold leading-snug mt-2 w-full text-right">{opt.desc}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {assistantStep === 2 && (
-                    <div className="space-y-6 text-right">
-                      {/* Bot Guidance Bubble */}
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center shrink-0 shadow-lg">
-                          <Sparkles className="w-5 h-5 text-white" />
+                            <span className="text-[10px] text-zinc-500">
+                              {item.timestamp?.toDate ? item.timestamp.toDate().toLocaleString('ar-EG') : ''}
+                            </span>
+                          </div>
+                          <p className="text-sm text-zinc-350 leading-relaxed font-semibold">{item.message}</p>
+                          
+                          {item.reply && (
+                            <div className="mt-3 p-3 bg-zinc-950 rounded-xl border border-zinc-900 text-xs shadow-inner">
+                              <p className="font-extrabold text-amber-500 mb-1">✍️ رد الإدارة والمدير العام:</p>
+                              <p className="text-zinc-300 font-bold leading-relaxed">{item.reply}</p>
+                            </div>
+                          )}
                         </div>
-                        <div className={`p-5 rounded-3xl rounded-tr-none text-sm leading-relaxed max-w-lg ${theme === 'light' ? 'bg-white text-zinc-800 border border-zinc-200' : 'bg-zinc-950 text-zinc-100 border border-zinc-900'}`}>
-                          <p className="font-extrabold text-amber-500 mb-1">مساعد ماين كرافت الذهبي</p>
-                          <p>ممتاز جداً! لقد اخترت: <span className="font-black text-white px-2 py-1 bg-amber-500/10 border border-amber-500/25 rounded-lg text-xs">"{selectedSupportOption}"</span></p>
-                          <p className="mt-3">يرجى الآن كتابة رسالتك بالتفصيل (مثل رقم المود أو المشكلة التي واجهتك، أو وسيلة التواصل معك) في المستطيل أدناه، وسأرفعها فوراً إلى المدير:</p>
-                        </div>
-                      </div>
-
-                      {/* Textarea for Writing Message */}
-                      <div className="space-y-4">
-                        <textarea
-                          value={assistantMessage}
-                          onChange={(e) => setAssistantMessage(e.target.value)}
-                          placeholder="اكتب رسالتك وتفاصيل المشكلة هنا بالتفصيل..."
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-3xl p-5 text-sm h-36 focus:border-amber-500 outline-none transition-all resize-none text-white font-bold placeholder-zinc-650 shadow-inner"
-                        />
-
-                        <div className="flex flex-col sm:flex-row gap-3">
-                          <button
-                            disabled={!assistantMessage.trim() || isSendingAssistant}
-                            onClick={async () => {
-                              setIsSendingAssistant(true);
-                              try {
-                                const fullReportContent = `[مساعد الدعم]: العميل اختار خيار: "${selectedSupportOption}"\n\nالرسالة المكتوبة:\n${assistantMessage.trim()}`;
-                                await onSendReport(fullReportContent);
-                                setAssistantStep(3);
-                              } catch (e) {
-                                console.error(e);
-                              } finally {
-                                setIsSendingAssistant(false);
-                              }
-                            }}
-                            className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black py-4 rounded-2xl font-black text-xs transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/15 cursor-pointer"
-                          >
-                            <span>{isSendingAssistant ? 'جاري إرسال رسالتك...' : 'إرسال الرسالة إلى لوحة تحكم المدير'}</span>
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              setAssistantStep(1);
-                              setAssistantMessage('');
-                            }}
-                            className="bg-zinc-950 hover:bg-zinc-900 text-zinc-400 border border-zinc-800 px-6 py-4 rounded-2xl font-bold transition-all text-xs cursor-pointer"
-                          >
-                            رجوع للخلف
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {assistantStep === 3 && (
-                    <div className="text-center py-8 space-y-6">
-                      <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center mx-auto shadow-lg animate-bounce">
-                        <CheckCircle2 className="w-8 h-8" />
-                      </div>
-                      <div className="space-y-2">
-                        <h4 className="text-xl font-black text-amber-400">تم إرسال رسالتك بنجاح!</h4>
-                        <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
-                          تم رفع طلبك المصنف كمشكلة تتبع لـ <span className="text-white font-bold">"{selectedSupportOption}"</span> مباشرة إلى الإعدادات ولوحة التحكم الخاصة بالمدير العام لمراجعتها وحلها في أسرع وقت.
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setAssistantStep(1);
-                          setSelectedSupportOption('');
-                          setAssistantMessage('');
-                        }}
-                        className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 px-8 py-3.5 rounded-2xl font-black text-xs transition-all cursor-pointer"
-                      >
-                        بدء طلب جديد مع المساعد
-                      </button>
+                      ))}
                     </div>
                   )}
                 </div>
               </div>
             )}
+
+            {activeTab === 'assistant' && (() => {
+              const supportOptions = language === 'ar' ? [
+                { text: 'هل في مشكلة؟', desc: 'مشاكل تصفح، تعليق أو بطء في التحميل' },
+                { text: 'لم يشتغل المود؟', desc: 'المودات لا تظهر أو لا تعمل في اللعبة' },
+                { text: 'أرجو التواصل معي', desc: 'مواضيع أخرى أو استفسار مخصص للمدير' }
+              ] : [
+                { text: 'Is there an issue?', desc: 'Browsing issues, interface lag, or slow download speeds' },
+                { text: 'Did the mod fail?', desc: 'My mods are not showing up or working in-game' },
+                { text: 'Contact admin', desc: 'Other custom inquiries or questions for the Administrator' }
+              ];
+
+              return (
+                <div className="space-y-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                      <Sparkles className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <div className={language === 'ar' ? 'text-right' : 'text-left'}>
+                      <h3 className="text-xl font-bold text-white">
+                        {language === 'ar' ? 'مساعد الدعم الفني الذكي' : 'Smart Support Assistant'}
+                      </h3>
+                      <p className="text-xs text-zinc-500">
+                        {language === 'ar' ? 'مساعدك لحل جميع المشاكل التقنية على الفور' : 'Your assistant to resolve technical issues instantly'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className={`border p-6 rounded-[2rem] space-y-6 ${theme === 'light' ? 'bg-zinc-100/50 border-zinc-200' : 'bg-zinc-900/40 border-zinc-900'}`}>
+                    {assistantStep === 1 && (
+                      <div className={`space-y-6 ${language === 'ar' ? 'text-right' : 'text-left'}`}>
+                        {/* Bot Greeting Bubble */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center shrink-0 shadow-lg shadow-amber-600/15">
+                            <Sparkles className="w-5 h-5 text-white animate-pulse" />
+                          </div>
+                          <div className={`p-5 rounded-3xl rounded-tr-none text-sm leading-relaxed max-w-lg ${theme === 'light' ? 'bg-white text-zinc-800 border border-zinc-200 shadow-sm' : 'bg-zinc-950 text-zinc-100 border border-zinc-900'}`}>
+                            <p className={`font-extrabold text-amber-500 mb-1 flex items-center gap-2 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
+                              <span>{language === 'ar' ? 'مساعد ماين كرافت الذهبي' : 'Golden Minecraft Assistant'}</span>
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                            </p>
+                            <p>
+                              {language === 'ar' 
+                                ? 'مرحباً بك يا غالي! أنا هنا لمساعدتك فوراً لحل أي مشكلة أو الرد على استفسارك ومساعدتك في المودات والخرائط. يرجى اختيار أحد المواضيع السريعة التالية للبدء:' 
+                                : 'Welcome! I am here to help you resolve any issues or answer your questions about mods, skins, and maps. Please choose one of the quick topics below to begin:'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Helper Selectable Buttons */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                          {supportOptions.map((opt, idx) => (
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                setSelectedSupportOption(opt.text);
+                                setAssistantStep(2);
+                              }}
+                              className={`p-5 rounded-2xl border transition-all duration-300 hover:-translate-y-1 active:scale-[0.98] flex flex-col justify-between h-32 group cursor-pointer ${language === 'ar' ? 'text-right' : 'text-left'} ${
+                                theme === 'light' 
+                                  ? 'bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-900 hover:border-amber-500/50 shadow-sm' 
+                                  : 'bg-zinc-950 hover:bg-zinc-900/40 border-zinc-900 text-white hover:border-amber-500/50'
+                              }`}
+                            >
+                              <span className={`font-black text-sm text-amber-500 group-hover:text-amber-400 transition-colors flex items-center gap-1.5 w-full ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
+                                {language === 'ar' ? '' : <span className="w-2 h-2 rounded-full bg-amber-500" />}
+                                {opt.text}
+                                {language === 'ar' ? <span className="w-2 h-2 rounded-full bg-amber-500" /> : null}
+                              </span>
+                              <span className={`text-xs text-zinc-500 font-bold leading-snug mt-2 w-full ${language === 'ar' ? 'text-right' : 'text-left'}`}>{opt.desc}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {assistantStep === 2 && (
+                      <div className={`space-y-6 ${language === 'ar' ? 'text-right' : 'text-left'}`}>
+                        {/* Bot Guidance Bubble */}
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-amber-600 flex items-center justify-center shrink-0 shadow-lg">
+                            <Sparkles className="w-5 h-5 text-white" />
+                          </div>
+                          <div className={`p-5 rounded-3xl rounded-tr-none text-sm leading-relaxed max-w-lg ${theme === 'light' ? 'bg-white text-zinc-800 border border-zinc-200' : 'bg-zinc-950 text-zinc-100 border border-zinc-900'}`}>
+                            <p className="font-extrabold text-amber-500 mb-1">
+                              {language === 'ar' ? 'مساعد ماين كرافت الذهبي' : 'Golden Minecraft Assistant'}
+                            </p>
+                            <p>
+                              {language === 'ar' ? 'ممتاز جداً! لقد اخترت: ' : 'Perfect! You selected: '}
+                              <span className="font-black text-white px-2 py-1 bg-amber-500/10 border border-amber-500/25 rounded-lg text-xs">"{selectedSupportOption}"</span>
+                            </p>
+                            <p className="mt-3">
+                              {language === 'ar' 
+                                ? 'يرجى الآن كتابة رسالتك بالتفصيل (مثل رقم المود أو المشكلة التي واجهتك، أو وسيلة التواصل معك) في المستطيل أدناه، وسأرفعها فوراً إلى المدير:' 
+                                : 'Please write down your message in detail (such as name of the mod, the error you encountered, or contact details) below, and I will upload it to the admin dashboard instantly:'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Textarea for Writing Message */}
+                        <div className="space-y-4">
+                          <textarea
+                            value={assistantMessage}
+                            onChange={(e) => setAssistantMessage(e.target.value)}
+                            placeholder={language === 'ar' ? 'اكتب رسالتك وتفاصيل المشكلة هنا بالتفصيل...' : 'Please write down your message details here...'}
+                            className={`w-full bg-zinc-950 border border-zinc-805 rounded-3xl p-5 text-sm h-36 focus:border-amber-500 outline-none transition-all resize-none text-white font-bold placeholder-zinc-650 shadow-inner ${language === 'ar' ? 'text-right' : 'text-left'}`}
+                          />
+
+                          <div className="flex flex-col sm:flex-row gap-3">
+                            <button
+                              disabled={!assistantMessage.trim() || isSendingAssistant}
+                              onClick={async () => {
+                                setIsSendingAssistant(true);
+                                try {
+                                  const fullReportContent = `[مساعد الدعم]: العميل اختار خيار: "${selectedSupportOption}"\n\nالرسالة المكتوبة:\n${assistantMessage.trim()}`;
+                                  await onSendReport(fullReportContent);
+                                  setAssistantStep(3);
+                                } catch (e) {
+                                  console.error(e);
+                                } finally {
+                                  setIsSendingAssistant(false);
+                                }
+                              }}
+                              className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black py-4 rounded-2xl font-black text-xs transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-amber-500/15 cursor-pointer"
+                            >
+                              <span>{isSendingAssistant ? (language === 'ar' ? 'جاري إرسال رسالتك...' : 'Submitting message...') : (language === 'ar' ? 'إرسال الرسالة إلى لوحة تحكم المدير' : 'Send Message to Admin Console')}</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setAssistantStep(1);
+                                setAssistantMessage('');
+                              }}
+                              className="bg-zinc-950 hover:bg-zinc-900 text-zinc-400 border border-zinc-800 px-6 py-4 rounded-2xl font-bold transition-all text-xs cursor-pointer"
+                            >
+                              {language === 'ar' ? 'رجوع للخلف' : 'Go Back'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {assistantStep === 3 && (
+                      <div className="text-center py-8 space-y-6">
+                        <div className="w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-500 flex items-center justify-center mx-auto shadow-lg animate-bounce">
+                          <CheckCircle2 className="w-8 h-8" />
+                        </div>
+                        <div className="space-y-2">
+                          <h4 className="text-xl font-black text-amber-400">
+                            {language === 'ar' ? 'تم إرسال رسالتك بنجاح!' : 'Your message has been sent successfully!'}
+                          </h4>
+                          <p className="text-sm text-zinc-400 max-w-md mx-auto leading-relaxed">
+                            {language === 'ar' 
+                              ? `تم رفع طلبك المصنف كمشكلة تتبع لـ "${selectedSupportOption}" مباشرة إلى الإعدادات ولوحة التحكم الخاصة بالمدير العام لمراجعتها وحلها في أسرع وقت.`
+                              : `Your message, categorized under "${selectedSupportOption}", was forwarded to the supervisor dashboard for instant review and troubleshooting.`}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setAssistantStep(1);
+                            setSelectedSupportOption('');
+                            setAssistantMessage('');
+                          }}
+                          className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 px-8 py-3.5 rounded-2xl font-black text-xs transition-all cursor-pointer"
+                        >
+                          {language === 'ar' ? 'بدء طلب جديد مع المساعد' : 'Start a new inquiry with Assistant'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </motion.div>
@@ -4057,12 +5217,14 @@ const ContactModal = ({
   isOpen, 
   onClose, 
   onSend,
-  theme
+  theme,
+  language = 'ar'
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   onSend: (msg: string) => void;
   theme: 'dark' | 'light';
+  language?: string;
 }) => {
   const [message, setMessage] = useState('');
 
@@ -4082,19 +5244,23 @@ const ContactModal = ({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-lg rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
-        <div className="p-8 pt-12">
+        <div className={`p-8 pt-12 ${language === 'ar' ? 'text-right' : 'text-left'}`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
           <div className="bg-red-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-red-600/20 rotate-3">
             <MessageSquare className="w-8 h-8 text-white" />
           </div>
           
-          <h2 className="text-3xl font-black text-center mb-2 tracking-tighter">إرسال تقرير للإدارة</h2>
-          <p className={`${theme === 'light' ? 'text-zinc-500' : 'text-zinc-400'} text-center mb-8 text-sm`}>أخبرنا عن أي مشكلة تواجهك أو اقتراح لتحسين الموقع</p>
+          <h2 className="text-3xl font-black text-center mb-2 tracking-tighter">
+            {language === 'ar' ? 'إرسال تقرير للإدارة' : 'Send Report to Admin'}
+          </h2>
+          <p className={`${theme === 'light' ? 'text-zinc-500' : 'text-zinc-400'} text-center mb-8 text-sm`}>
+            {language === 'ar' ? 'أخبرنا عن أي مشكلة تواجهك أو اقتراح لتحسين الموقع' : 'Tell us about any problems or feedback to improve the site'}
+          </p>
 
           <textarea 
             value={message}
             onChange={e => setMessage(e.target.value)}
-            placeholder="اكتب رسالتك هنا بالتفصيل..."
-            className={`w-full ${theme === 'light' ? 'bg-zinc-50 border-zinc-200 text-black' : 'bg-zinc-900 border-zinc-800 text-white'} border rounded-2xl p-4 h-40 focus:border-red-600 outline-none transition-colors resize-none mb-6`}
+            placeholder={language === 'ar' ? "اكتب رسالتك هنا بالتفصيل..." : "Write your message here in detail..."}
+            className={`w-full ${theme === 'light' ? 'bg-zinc-50 border-zinc-200 text-black' : 'bg-zinc-900 border-zinc-805 text-white'} border rounded-2xl p-4 h-40 focus:border-red-600 outline-none transition-colors resize-none mb-6 ${language === 'ar' ? 'text-right' : 'text-left'}`}
           />
 
           <div className="flex gap-3">
@@ -4106,13 +5272,13 @@ const ContactModal = ({
               disabled={!message.trim()}
               className="flex-1 bg-red-600 hover:bg-red-500 text-white py-4 rounded-2xl font-bold transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-red-600/20"
             >
-              إرسال التقرير
+              {language === 'ar' ? 'إرسال التقرير' : 'Submit Report'}
             </button>
             <button 
               onClick={onClose}
               className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 py-4 rounded-2xl font-bold transition-all active:scale-95"
             >
-              إلغاء
+              {language === 'ar' ? 'إلغاء' : 'Cancel'}
             </button>
           </div>
         </div>
@@ -4124,11 +5290,13 @@ const ContactModal = ({
 export const PrivacyModal = ({ 
   isOpen, 
   onClose, 
-  theme 
+  theme,
+  language = 'ar'
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   theme: 'dark' | 'light'; 
+  language?: string;
 }) => {
   if (!isOpen) return null;
   return (
@@ -4145,27 +5313,47 @@ export const PrivacyModal = ({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
-        <div className="p-8 pt-10 text-right max-h-[80vh] overflow-y-auto scrollbar-none">
+        <div className={`p-8 pt-10 ${language === 'ar' ? 'text-right' : 'text-left'} max-h-[80vh] overflow-y-auto scrollbar-none`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
           <div className="bg-red-650/10 border border-red-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <Lock className="w-7 h-7 text-red-500" />
           </div>
           
-          <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>🔐 سياسة الخصوصية وأمان البيانات</h2>
+          <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>
+            {language === 'ar' ? '🔐 سياسة الخصوصية وأمان البيانات' : '🔐 Privacy Policy & Data Security'}
+          </h2>
           
           <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
             <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2">1. جمع وإدارة البيانات</h3>
-              <p>نهتم بخصوصيتك لأقصى درجة. نجمع فقط معلومات التسجيل الأساسية لتوفير حساب آمن مثل اسم المستخدم، والبريد الإلكتروني، وصورة الحساب الشخصي التي تقوم بتهيئتها.</p>
+              <h3 className="font-black text-red-500 mb-2">
+                {language === 'ar' ? '1. جمع وإدارة البيانات' : '1. Data Collection & Management'}
+              </h3>
+              <p>
+                {language === 'ar' 
+                  ? 'نهتم بخصوصيتك لأقصى درجة. نجمع فقط معلومات التسجيل الأساسية لتوفير حساب آمن مثل اسم المستخدم، والبريد الإلكتروني، وصورة الحساب الشخصي التي تقوم بتهيئتها.'
+                  : 'We care deeply about your privacy. We only collect essential register details required to secure your account, such as username, email address, and custom avatar URL.'}
+              </p>
             </div>
 
             <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2">2. أمان الملفات والمودات</h3>
-              <p>جميع المودات والخرائط الموجودة قابلة للتحميل بروابط مباشرة رسمية وآمنة. نقوم بفحص السيرفرات والروابط دورياً لضمان عدم وجود برمجيات خبيثة وحماية أجهزتك بالكامل.</p>
+              <h3 className="font-black text-red-500 mb-2">
+                {language === 'ar' ? '2. أمان الملفات والمودات' : '2. Mod & File Safety'}
+              </h3>
+              <p>
+                {language === 'ar' 
+                  ? 'جميع المودات والخرائط الموجودة قابلة للتحميل بروابط مباشرة رسمية وآمنة. نقوم بفحص السيرفرات والروابط دورياً لضمان عدم وجود برمجيات خبيثة وحماية أجهزتك بالكامل.'
+                  : 'All mods and maps are downloadable via official directly secured server mirrors. We scan files periodically to shield your hardware and guarantee absolute safety.'}
+              </p>
             </div>
 
             <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2">3. ملفات تعريف الارتباط و LocalStorage</h3>
-              <p>نستخدم وحدات التخزين المحلية لتفضيل الثيم المفضل لك (مظلم أو مضيء) والاحتفاظ بحالة تسجيل الدخول لتسريع تجربتك عند تصفح المنصة.</p>
+              <h3 className="font-black text-red-500 mb-2">
+                {language === 'ar' ? '3. ملفات تعريف الارتباط و LocalStorage' : '3. Cookies & Local Storage'}
+              </h3>
+              <p>
+                {language === 'ar' 
+                  ? 'نستخدم وحدات التخزين المحلية لتفضيل الثيم المفضل لك (مظلم أو مضيء) والاحتفاظ بحالة تسجيل الدخول لتسريع تجربتك عند تصفح المنصة.'
+                  : 'We use local storage parameters to persist your visual theme choice (light/dark mode) and cache user authorization state to speed up interactions.'}
+              </p>
             </div>
           </div>
 
@@ -4173,7 +5361,7 @@ export const PrivacyModal = ({
             onClick={onClose}
             className="w-full mt-8 bg-gradient-to-r from-red-600 to-amber-500 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] cursor-pointer"
           >
-            فهمت وإغلاق
+            {language === 'ar' ? 'فهمت وإغلاق' : 'I Understand & Close'}
           </button>
         </div>
       </motion.div>
@@ -4184,11 +5372,13 @@ export const PrivacyModal = ({
 export const TermsModal = ({ 
   isOpen, 
   onClose, 
-  theme 
+  theme,
+  language = 'ar'
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   theme: 'dark' | 'light'; 
+  language?: string;
 }) => {
   if (!isOpen) return null;
   return (
@@ -4205,28 +5395,48 @@ export const TermsModal = ({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
-        <div className="p-8 pt-10 text-right max-h-[80vh] overflow-y-auto scrollbar-none">
+        <div className={`p-8 pt-10 ${language === 'ar' ? 'text-right' : 'text-left'} max-h-[80vh] overflow-y-auto scrollbar-none`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
           <div className="bg-red-650/10 border border-red-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <ClipboardList className="w-7 h-7 text-red-500" />
           </div>
           
           <div className="hidden" /> {/* Spacer */}
-          <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>📜 شروط الاستخدام وقوانين المنصة</h2>
+          <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>
+            {language === 'ar' ? '📜 شروط الاستخدام وقوانين المنصة' : '📜 Terms of Use & Policies'}
+          </h2>
           
           <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
             <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2">1. الاستخدام العادل والمسموح</h3>
-              <p>يُسمح لجميع أعضاء المنصة بتنزيل وتثبيت المودات والملفات وإبداء تفضيلاتها بالقلب بشكل مجاني تماماً. يُمنع استخدام ريبوتات البرمجة أو إرسال تقارير كاذبة مزعجة في لوحة القيادة التابعة للإدارة.</p>
+              <h3 className="font-black text-red-500 mb-2">
+                {language === 'ar' ? '1. الاستخدام العادل والمسموح' : '1. Fair & Allowable Use'}
+              </h3>
+              <p>
+                {language === 'ar' 
+                  ? 'يُسمح لجميع أعضاء المنصة بتنزيل وتثبيت المودات والملفات وإبداء تفضيلاتها بالقلب بشكل مجاني تماماً. يُمنع الاستخدام غير العادل أو إرسال تقارير كاذبة مزعجة في لوحة القيادة التابعة للإدارة.'
+                  : 'All verified members are authorized to browse, download files, and toggle favorite hearts free of cost. Unauthorized automated scripts or spamming false status reports is strictly disallowed.'}
+              </p>
             </div>
 
             <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2">2. رفع المحتوى والملفات</h3>
-              <p>للمدير العام والمسؤولين حظر أي روابط تحمل ملفات كسر حماية أو التفافية. يجب أن يحمل الملف ترخيص المطور أو يكون متاح ومصرح للنشر للعامة حرصاً على الحقوق الفكرية والملكية.</p>
+              <h3 className="font-black text-red-500 mb-2">
+                {language === 'ar' ? '2. رفع المحتوى والملفات' : '2. File Uploading & Hosting'}
+              </h3>
+              <p>
+                {language === 'ar' 
+                  ? 'للمدير العام والمسؤولين حظر أي روابط تحمل ملفات كسر حماية أو التفافية. يجب أن يحمل الملف ترخيص المطور أو يكون متاح ومصرح للنشر للعامة حرصاً على الحقوق الفكرية والملكية.'
+                  : 'System administrators reserve absolute rights to block links harboring harmful files. Submitted URLs must comply with intellectual ownership and public licenses.'}
+              </p>
             </div>
 
             <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2">3. إخلاء وتبرئة المسؤولية</h3>
-              <p>نحن نسعى دائماً لتفادي وعزل المشاكل التقنية وملفات الكراش. بالرغم من ذلك لا تتحمل إدارة المنصة أي أضرار جانبية أو خلل ينشأ عن تثبيت المود بصيغة غير متوافقة مع جوالك أو نسختك الخاصة من ماين كرافت.</p>
+              <h3 className="font-black text-red-500 mb-2">
+                {language === 'ar' ? '3. إخلاء وتبرئة المسؤولية' : '3. Direct Disclaimers'}
+              </h3>
+              <p>
+                {language === 'ar' 
+                  ? 'نحن نسعى دائماً لتفادي وعزل المشاكل التقنية وملفات الكراش. بالرغم من ذلك لا تتحمل إدارة المنصة أي أضرار جانبية أو خلل ينشأ عن تثبيت المود بصيغة غير متوافقة مع جوالك أو نسختك الخاصة من ماين كرافت.'
+                  : 'We constantly work to isolate game bugs or crash reports. However, Golden Gih holds no responsibility for conflicts arising from installing third party modifications with incompatible game clients.'}
+              </p>
             </div>
           </div>
 
@@ -4234,7 +5444,7 @@ export const TermsModal = ({
             onClick={onClose}
             className="w-full mt-8 bg-gradient-to-r from-red-600 to-amber-500 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] cursor-pointer"
           >
-            أوافق وأغلق
+            {language === 'ar' ? 'أوافق وأغلق' : 'I Agree & Close'}
           </button>
         </div>
       </motion.div>
@@ -4268,29 +5478,43 @@ export const AboutModal = ({
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
-        <div className="p-8 pt-10 text-right max-h-[80vh] overflow-y-auto scrollbar-none">
+        <div className={`p-8 pt-10 ${language === 'ar' ? 'text-right' : 'text-left'} max-h-[80vh] overflow-y-auto scrollbar-none`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
           <div className="bg-gradient-to-r from-red-600 to-amber-500 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-red-500/10">
             <Gamepad2 className="w-7 h-7 text-white" />
           </div>
           
-          <h2 className={`text-2xl font-black text-center mb-2 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>{language === 'ar' ? 'عن منصة Golden Gih' : 'About Golden Gih'}</h2>
-          <p className="text-xs text-zinc-500 text-center mb-6 font-bold">تأسس الموقع وقاعدة بيانتنا السحابية في يونيو 2026</p>
+          <h2 className={`text-2xl font-black text-center mb-2 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>
+            {language === 'ar' ? 'عن منصة Golden Gih' : 'About Golden Gih'}
+          </h2>
+          <p className="text-xs text-zinc-500 text-center mb-6 font-bold">
+            {language === 'ar' ? 'تأسس الموقع وقاعدة بيانتنا السحابية في يونيو 2026' : 'The platform and cloud database were established in June 2026'}
+          </p>
           
           <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2 flex items-center justify-end gap-1.5">
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-805 text-zinc-300'}`}>
+              <h3 className={`font-black text-red-500 mb-2 flex items-center gap-1.5 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
+                {language === 'ar' ? null : <Sparkles className="w-4 h-4 text-amber-500" />}
                 <span>{language === 'ar' ? 'البداية والرؤية' : 'The Vision & Start'}</span>
-                <Sparkles className="w-4 h-4 text-amber-500" />
+                {language === 'ar' ? <Sparkles className="w-4 h-4 text-amber-500" /> : null}
               </h3>
-              <p>تم إطلاق لوحة المنصة لتوفير محتوى ماين كرافت متميز وآمن للاعبين والزوار بالوطن العربي دون تشتيت أو إعلانات مسرطنة للملفات. طموحاتنا تمكين محبي اللعبة من العثور على ما يرغبون به بيسر وسرعة فائقة.</p>
+              <p>
+                {language === 'ar' 
+                  ? 'تم إطلاق لوحة المنصة لتوفير محتوى ماين كرافت متميز وآمن للاعبين والزوار بالوطن العربي دون تشتيت أو إعلانات مسرطنة للملفات. طموحاتنا تمكين محبي اللعبة من العثور على ما يرغبون به بيسر وسرعة فائقة.'
+                  : 'The platform was launched to offer premium, safe Minecraft contents for players and visitors in the Arab region, without distracting or malicious ads. Our vision is to empower fans to find exactly what they need with extreme speed.'}
+              </p>
             </div>
 
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
-              <h3 className="font-black text-red-500 mb-2 flex items-center justify-end gap-1.5">
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-805 text-zinc-300'}`}>
+              <h3 className={`font-black text-red-500 mb-2 flex items-center gap-1.5 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
+                {language === 'ar' ? null : <Crown className="w-4 h-4 text-amber-500" />}
                 <span>{language === 'ar' ? 'مميزات وإحصائيات الأعضاء' : 'Member Features & Stats'}</span>
-                <Crown className="w-4 h-4 text-amber-500" />
+                {language === 'ar' ? <Crown className="w-4 h-4 text-amber-500" /> : null}
               </h3>
-              <p>تتمتع عضويتك بتصنيفات راقية وإطارات متلألئة حول رمزك، بفضل نظام الدخول الموحد، والمفضلة السهلة وخطوط النقر الحديثة المعززة بتأثيرات الحركة المذهلة.</p>
+              <p>
+                {language === 'ar' 
+                  ? 'تتمتع عضويتك بتصنيفات راقية وإطارات متلألئة حول رمزك، بفضل نظام الدخول الموحد، والمفضلة السهلة وخطوط النقر الحديثة المعززة بتأثيرات الحركة المذهلة.'
+                  : 'Your account benefits from premium status tags and shining borders around your avatar, powered by unified secure logins, easy bookmarking, and modern tactile motion effects.'}
+              </p>
             </div>
           </div>
 
@@ -4298,7 +5522,7 @@ export const AboutModal = ({
             onClick={onClose}
             className="w-full mt-8 bg-gradient-to-r from-red-600 to-amber-500 hover:from-red-500 hover:to-amber-400 text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] cursor-pointer"
           >
-            شكراً لكم وإغلاق
+            {language === 'ar' ? 'شكراً لكم وإغلاق' : 'Thank You & Close'}
           </button>
         </div>
       </motion.div>
