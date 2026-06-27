@@ -48,7 +48,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
       
       {/* 1. Lucky Mod Roulette (Straight and Elegant) */}
       <div className="bg-zinc-950 border border-zinc-900 p-5 rounded-2xl relative overflow-hidden text-right shadow-2xl transition-all duration-300">
-        <div className="absolute top-0 right-0 w-24 h-24 bg-red-650/5 rounded-full blur-2xl pointer-events-none" />
+        <div className="absolute top-0 right-0 w-24 h-24 bg-red-950 rounded-full blur-2xl pointer-events-none" />
         
         <div className="flex items-center justify-between pb-3 border-b border-zinc-900 mb-4">
           <span className="text-[9px] text-zinc-400 bg-zinc-900 px-2.5 py-1 rounded-xl border border-zinc-800 uppercase font-black tracking-widest flex items-center gap-1">
@@ -71,22 +71,22 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
           {rolledMod ? (
             <motion.div
               key={rolledMod.id}
-              initial={{ scale: 0.98, opacity: 0 }}
+              initial={{ scale: 0.98, opacity: 1 }}
               animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.98, opacity: 0 }}
-              className="bg-black/40 border border-zinc-900 rounded-xl p-3 mb-4 flex gap-3 text-right items-center select-none"
+              exit={{ scale: 0.98, opacity: 1 }}
+              className="bg-zinc-900 border border-zinc-900 rounded-xl p-3 mb-4 flex gap-3 text-right items-center select-none"
             >
               <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 border border-zinc-900 bg-zinc-950 relative">
                 <img src={rolledMod.thumbnail || null} alt="" className="w-full h-full object-cover" />
                 {isSpinning && (
-                  <div className="absolute inset-0 bg-zinc-950/80 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-zinc-950 flex items-center justify-center">
                     <Sparkles className="w-5 h-5 text-yellow-400 animate-spin" />
                   </div>
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] bg-red-500/10 text-red-400 font-extrabold px-1.5 py-0.2 rounded border border-red-500/10">
+                  <span className="text-[8px] bg-red-950 text-red-400 font-extrabold px-1.5 py-0.2 rounded border border-red-900">
                     {rolledMod.category}
                   </span>
                   {!isSpinning && (
@@ -107,7 +107,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
               </div>
             </motion.div>
           ) : (
-            <div className="border border-zinc-900/80 bg-zinc-900/10 text-center py-7 rounded-xl mb-4 border-dashed">
+            <div className="border border-zinc-900 bg-zinc-900 text-center py-7 rounded-xl mb-4 border-dashed">
               <Dices className="w-8 h-8 text-zinc-550 mx-auto mb-2" />
               <p className="text-[10px] text-zinc-500 font-bold">{language === 'ar' ? 'بانتظار تدوير الروليت...' : 'Awaiting spin trigger...'}</p>
             </div>
@@ -134,7 +134,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
           <Crown className="w-4 h-4 text-amber-500" />
           {language === 'ar' ? 'إضافات ذهبية يدوية الاختيار' : 'EXCLUSIVE HAND-PICKED ADD-ONS'}
         </h3>
-        <span className="text-[8px] text-yellow-405 bg-yellow-500/10 px-2.5 py-0.5 rounded-full border border-yellow-500/20 uppercase font-black tracking-wider">
+        <span className="text-[8px] text-yellow-405 bg-yellow-950 px-2.5 py-0.5 rounded-full border border-yellow-800 uppercase font-black tracking-wider">
           EXCLUSIVE
         </span>
       </div>
@@ -145,7 +145,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
           return (
             <motion.div 
               key={mod.id}
-              initial={{ opacity: 0, y: 10 }}
+              initial={{ opacity: 1, y: 10 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.3 }}
@@ -164,7 +164,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
               </div>
               <div className="flex-1 text-right w-full min-w-0 space-y-1">
                 <div className="flex items-center justify-between gap-1">
-                  <span className="text-[8px] font-black text-red-500 uppercase bg-red-650/10 px-2 py-0.5 rounded-md border border-red-500/10">
+                  <span className="text-[8px] font-black text-red-500 uppercase bg-red-950 px-2 py-0.5 rounded-md border border-red-900">
                     {mod.category}
                   </span>
                   <div className="flex items-center gap-0.5 text-[9px] font-black text-amber-400">
@@ -178,7 +178,7 @@ export const SidebarSection: React.FC<SidebarSectionProps> = React.memo(({
                 
                 <button 
                   onClick={() => onDownload(mod.title, mod.downloadUrl, mod.description, mod.category)}
-                  className="text-zinc-300 hover:text-white text-[9px] font-black flex items-center gap-1 transition-all bg-black/60 border border-zinc-900 hover:border-zinc-800 px-2.5 py-1 rounded-lg"
+                  className="text-zinc-300 hover:text-white text-[9px] font-black flex items-center gap-1 transition-all bg-zinc-900 border border-zinc-850 hover:border-zinc-800 px-2.5 py-1 rounded-lg"
                 >
                   <Download className="w-3 h-3 text-red-500" />
                   {language === 'ar' ? 'تحميل المود' : 'Get Mod'}

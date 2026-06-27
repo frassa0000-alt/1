@@ -30,6 +30,8 @@ import {
   Settings,
   ClipboardList,
   Plus,
+  Edit,
+  Edit3,
   Trash2,
   MessageSquare,
   ShieldCheck,
@@ -55,6 +57,7 @@ import {
   Crown,
   Zap,
   Sparkles,
+  Gift,
   Youtube,
   Send,
   Twitter,
@@ -105,6 +108,8 @@ import {
 import { GoogleGenAI, Type } from '@google/genai';
 // @ts-ignore
 import backgroundImage from './assets/images/gih_bg_golden_1781052220481.png';
+// @ts-ignore
+import gihEarthLogo from './assets/images/gih_earth_logo_1782566158589.jpg';
 
 // Import Modular Dashboard Components statically for robust single-file bundling
 import { HeroSection } from './components/HeroSection';
@@ -145,8 +150,10 @@ interface UserProfileData {
   minecraftEdition?: 'java' | 'bedrock';
   points?: number;
   lastPointsClaimedAt?: string | null;
+  lastGihClaimedAt?: string | null;
   purchased?: string[];
   bio?: string;
+  referralsCount?: number;
 }
 
 interface Report {
@@ -297,6 +304,20 @@ const AppContent = () => {
       };
     });
   }, [games, allReviews]);
+
+  // Save referral code from URL query string if present
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const ref = params.get('ref');
+      if (ref) {
+        localStorage.setItem('gih_referral_code', ref);
+        console.log("Saved referral code to local storage:", ref);
+      }
+    } catch (e) {
+      console.warn("Failed checking referral code query param:", e);
+    }
+  }, []);
 
   const [deletedGameIds, setDeletedGameIds] = useState<string[]>(() => {
     try {
@@ -477,7 +498,7 @@ const AppContent = () => {
   }>({
     siteName: 'جولدن',
     siteDescription: 'جولدن - محتوى ماين كرافت عربي مميز لأخبار، شروحات، مودات و كل ما يخص عالم ماين كرافت!',
-    siteLogo: '',
+    siteLogo: gihEarthLogo,
     siteUrl: 'https://golden-mc.com',
     adminEmail: 'admin@golden-mc.com',
     timezone: 'القاهرة (UTC+02:00)',
@@ -551,6 +572,88 @@ const AppContent = () => {
   };
 
   const totalPoints = user ? (userProfile?.points || 0) : guestPoints;
+
+  const handleShareWebsite = () => {
+    const shareData = {
+      title: generalSettings.siteName || 'جولدن',
+      text: generalSettings.siteDescription || 'جولدن - محتوى ماين كرافت عربي مميز لأخبار، شروحات، مودات و كل ما يخص عالم ماين كرافت!',
+      url: window.location.origin,
+    };
+
+    if (navigator.share) {
+      navigator.share(shareData)
+        .catch((err) => {
+          navigator.clipboard.writeText(window.location.origin);
+          alert(language === 'ar' ? 'تم نسخ رابط الموقع بنجاح! شاركه الآن مع أصدقائك 🚀' : 'Website link copied successfully! Share it with your friends 🚀');
+        });
+    } else {
+      navigator.clipboard.writeText(window.location.origin);
+      alert(language === 'ar' ? 'تم نسخ رابط الموقع بنجاح! شاركه الآن مع أصدقائك 🚀' : 'Website link copied successfully! Share it with your friends 🚀');
+    }
+  };
+
+  const handleGihNamePointsClaim = async () => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    
+    if (user) {
+      const lastClaimed = userProfile?.lastGihClaimedAt || null;
+      if (lastClaimed === todayStr) {
+        setPointsNotification({
+          show: true,
+          points: 0,
+          message: language === 'ar' 
+            ? 'لقد حصلت على نقاط مكافأة Gih لليوم بالفعل! عد غداً للحصول عليها مجدداً. ⚡' 
+            : 'You have already claimed today\'s Gih reward! Come back tomorrow. ⚡'
+        });
+        return;
+      }
+      
+      const currentPoints = userProfile?.points || 0;
+      const newPoints = currentPoints + 10;
+      
+      try {
+        await updateDoc(doc(db, 'users', user.uid), {
+          points: newPoints,
+          lastGihClaimedAt: todayStr
+        });
+        
+        setPointsNotification({
+          show: true,
+          points: 10,
+          message: language === 'ar' 
+            ? 'رائع! لقد حصلت على 10 نقاط مكافأة لنقرك على Gih اليوم! 🎉' 
+            : 'Awesome! You successfully claimed 10 points Gih daily bonus! 🎉'
+        });
+      } catch (error) {
+        console.error("Error updating profile points:", error);
+      }
+    } else {
+      const guestLastGihClaimed = localStorage.getItem('gih_guest_last_gih_claimed');
+      if (guestLastGihClaimed === todayStr) {
+        setPointsNotification({
+          show: true,
+          points: 0,
+          message: language === 'ar' 
+            ? 'لقد حصلت على نقاط مكافأة Gih لليوم بالفعل! عد غداً للحصول عليها مجدداً. ⚡ (سجل دخولك لحفظها على السحاب!)' 
+            : 'You have already claimed today\'s Gih reward! Come back tomorrow. ⚡ (Sign in to sync your points!)'
+        });
+        return;
+      }
+      
+      const newPoints = guestPoints + 10;
+      localStorage.setItem('gih_guest_points', String(newPoints));
+      localStorage.setItem('gih_guest_last_gih_claimed', todayStr);
+      setGuestPoints(newPoints);
+      
+      setPointsNotification({
+        show: true,
+        points: 10,
+        message: language === 'ar' 
+          ? 'رائع! لقد حصلت على 10 نقاط مكافأة كزائر لنقرك على Gih اليوم! 🎉 (سجل الدخول لحفظ نقاطك بشكل دائم!)' 
+          : 'Awesome! You successfully claimed 10 points guest Gih daily bonus! 🎉 (Sign in to save permanently!)'
+      });
+    }
+  };
 
   const handleImageClickPointsClaim = async () => {
     const todayStr = new Date().toLocaleDateString('en-CA');
@@ -1020,6 +1123,37 @@ const AppContent = () => {
           
           if (!docSnap.exists()) {
             // First time login - Create full profile
+            let startingPoints = 0;
+            const refCode = localStorage.getItem('gih_referral_code');
+            if (refCode && refCode !== currentUser.uid) {
+              try {
+                const referrerRef = doc(db, 'users', refCode);
+                const referrerSnap = await getDoc(referrerRef);
+                if (referrerSnap.exists()) {
+                  const rData = referrerSnap.data();
+                  const currentReferrerPoints = rData.points || 0;
+                  await updateDoc(referrerRef, {
+                    points: currentReferrerPoints + 40,
+                    referralsCount: increment(1)
+                  });
+                  // Log system report
+                  await addDoc(collection(db, 'reports'), {
+                    userEmail: 'system',
+                    message: `🎉 العضو الجديد (${currentUser.email || 'غير معروف'}) سجل عبر رابط دعوة صديق. حصل الداعي (${rData.email || 'غير معروف'}) على 40 نقطة إضافية!`,
+                    status: 'resolved',
+                    isSystemWarning: false,
+                    timestamp: serverTimestamp()
+                  });
+                  // Grant 40 welcome points to the referred user as well
+                  startingPoints = 40;
+                }
+              } catch (err) {
+                console.warn("Error processing referral points reward:", err);
+              } finally {
+                localStorage.removeItem('gih_referral_code');
+              }
+            }
+
             await setDoc(userRef, {
               uid: currentUser.uid,
               email: currentUser.email || '',
@@ -1033,6 +1167,9 @@ const AppContent = () => {
               minecraftEdition: selectedEdition,
               createdAt: serverTimestamp(),
               lastLogin: serverTimestamp(),
+              points: startingPoints,
+              referredBy: refCode || null,
+              referralsCount: 0
             });
 
             // Increment global users count in stats
@@ -1466,6 +1603,15 @@ const AppContent = () => {
     }
   };
 
+  const handleUpdateGame = async (gameId: string, gameData: Partial<Game>) => {
+    if (!isAdmin) return;
+    try {
+      await updateDoc(doc(db, 'games', gameId), gameData);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `games/${gameId}`);
+    }
+  };
+
   const handleDeleteGame = async (gameId: string) => {
     if (!isAdmin) return;
     // Optimistic fast deletion update state and localstorage
@@ -1537,48 +1683,91 @@ const AppContent = () => {
       }
     };
 
-    const activeMsg = getBilingualLoadingMessage();
-    const angleInRad = ((visualProgress / 100) * 360 - 90) * (Math.PI / 180);
-    const headX = 100 + 64 * Math.cos(angleInRad);
-    const headY = 100 + 64 * Math.sin(angleInRad);
+    const particles = [
+      { x: -95, y: -20, s: 4, o: 0.75, delay: 0.2 },
+      { x: -90, y: -45, s: 3, o: 0.5, delay: 0.5 },
+      { x: -105, y: 10, s: 5, o: 0.85, delay: 0.1 },
+      { x: -115, y: -10, s: 3.5, o: 0.4, delay: 0.8 },
+      { x: -85, y: 35, s: 6, o: 0.8, delay: 0.4 },
+      { x: -92, y: 55, s: 4, o: 0.55, delay: 1.1 },
+      { x: -110, y: -30, s: 3, o: 0.45, delay: 1.3 },
+      { x: -120, y: 25, s: 4.5, o: 0.6, delay: 0.7 },
+      { x: -82, y: -60, s: 5, o: 0.7, delay: 0.9 },
+      { x: -100, y: -70, s: 3, o: 0.35, delay: 1.5 },
+      { x: 95, y: -20, s: 4, o: 0.8, delay: 0.3 },
+      { x: 90, y: -45, s: 3, o: 0.55, delay: 0.6 },
+      { x: 105, y: 10, s: 5, o: 0.9, delay: 0.0 },
+      { x: 115, y: -10, s: 3.5, o: 0.45, delay: 0.7 },
+      { x: 85, y: 35, s: 6, o: 0.85, delay: 0.5 },
+      { x: 92, y: 55, s: 4, o: 0.65, delay: 1.2 },
+      { x: 110, y: -30, s: 3, o: 0.5, delay: 1.4 },
+      { x: 120, y: 25, s: 4.5, o: 0.75, delay: 0.8 },
+      { x: 82, y: -60, s: 5, o: 0.6, delay: 1.0 },
+      { x: 100, y: -70, s: 3, o: 0.4, delay: 1.6 },
+      { x: -40, y: -95, s: 3, o: 0.55, delay: 0.2 },
+      { x: 40, y: -95, s: 4, o: 0.65, delay: 0.5 },
+      { x: -10, y: -105, s: 3, o: 0.45, delay: 0.9 },
+      { x: 20, y: -102, s: 3, o: 0.55, delay: 1.1 },
+      { x: -50, y: 92, s: 4, o: 0.65, delay: 0.4 },
+      { x: 45, y: 95, s: 3, o: 0.55, delay: 0.7 },
+      { x: -15, y: 105, s: 3, o: 0.45, delay: 1.3 },
+      { x: 15, y: 102, s: 4, o: 0.65, delay: 0.8 },
+    ];
 
     return (
       <div className="min-h-screen bg-[#030304] flex flex-col items-center justify-center relative overflow-hidden select-none">
         {/* Radial dark atmospheric background vignette */}
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_#0a0805_0%,_#020203_100%)] pointer-events-none" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_#0c0a07_0%,_#020203_100%)] pointer-events-none" />
         
-        {/* Soft glowing ambient orbs */}
-        <div className="absolute w-[240px] h-[240px] bg-amber-500/[0.03] rounded-full blur-[80px] pointer-events-none" />
+        {/* Soft glowing golden ambient orb behind the coin */}
+        <div className="absolute w-[320px] h-[320px] bg-amber-500/[0.04] rounded-full blur-[100px] pointer-events-none" />
         
         <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
+          initial={{ opacity: 0, scale: 0.94 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
-          className="flex flex-col items-center justify-center text-center max-w-[240px] w-full"
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          className="flex flex-col items-center justify-center text-center max-w-[320px] w-full relative z-10"
         >
-          {/* Main Gih Loading Ring Container */}
-          <div className="relative w-48 h-48 flex items-center justify-center">
-            <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-[0_0_20px_rgba(245,158,11,0.15)]">
+          {/* Main Gih Medallion Container */}
+          <div className="relative w-64 h-64 flex items-center justify-center">
+            <svg 
+              viewBox="0 0 200 200" 
+              className="w-full h-full filter drop-shadow-[0_16px_32px_rgba(20,15,5,0.18)] drop-shadow-[0_0_24px_rgba(245,158,11,0.12)]"
+            >
               <defs>
-                {/* Luminous Golden Metallic Text Gradient */}
-                <linearGradient id="gold-text-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#ffea88" />
-                  <stop offset="25%" stopColor="#f59e0b" />
-                  <stop offset="50%" stopColor="#fffae0" />
-                  <stop offset="75%" stopColor="#d97706" />
-                  <stop offset="100%" stopColor="#78350f" />
+                {/* Golden metallic rim outer gradient */}
+                <linearGradient id="gold-rim-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#fff8df" />
+                  <stop offset="30%" stopColor="#fbbf24" />
+                  <stop offset="65%" stopColor="#ca8a04" />
+                  <stop offset="100%" stopColor="#713f12" />
                 </linearGradient>
 
-                {/* Glowing Neon Arc Gradient */}
+                {/* Inner gold rim highlight */}
+                <linearGradient id="gold-inner-rim-grad" x1="100%" y1="100%" x2="0%" y2="0%">
+                  <stop offset="0%" stopColor="#fffbeb" />
+                  <stop offset="50%" stopColor="#fef08a" />
+                  <stop offset="100%" stopColor="#ca8a04" />
+                </linearGradient>
+
+                {/* Luminous Golden Front Face Gradient for Gih Logo */}
+                <linearGradient id="gih-gold-front" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#fffbeb" />
+                  <stop offset="15%" stopColor="#fef08a" />
+                  <stop offset="65%" stopColor="#eab308" />
+                  <stop offset="100%" stopColor="#854d0e" />
+                </linearGradient>
+
+                {/* Rotating active glow neon arc gradient */}
                 <linearGradient id="active-gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#d97706" />
-                  <stop offset="60%" stopColor="#fbbf24" />
-                  <stop offset="100%" stopColor="#fffbeb" />
+                  <stop offset="0%" stopColor="#fbbf24" />
+                  <stop offset="50%" stopColor="#f59e0b" />
+                  <stop offset="100%" stopColor="#ffffff" />
                 </linearGradient>
 
-                {/* Intense Bloom Filter */}
-                <filter id="gold-glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="3.5" result="blur" />
+                {/* Golden glow bloom filter */}
+                <filter id="gold-glow" x="-30%" y="-30%" width="160%" height="160%">
+                  <feGaussianBlur stdDeviation="4" result="blur" />
                   <feMerge>
                     <feMergeNode in="blur" />
                     <feMergeNode in="SourceGraphic" />
@@ -1586,179 +1775,140 @@ const AppContent = () => {
                 </filter>
               </defs>
 
-              {/* Base Track Ring */}
+              {/* Shimmering Golden Floating Particles Scattered around the Medallion */}
+              {particles.map((p, i) => (
+                <motion.rect
+                  key={i}
+                  x={100 + p.x - p.s / 2}
+                  y={100 + p.y - p.s / 2}
+                  width={p.s}
+                  height={p.s}
+                  fill="#f59e0b"
+                  animate={{
+                    opacity: [p.o * 0.35, p.o, p.o * 0.35],
+                    scale: [0.85, 1.15, 0.85],
+                    y: [100 + p.y - p.s / 2, 100 + p.y - p.s / 2 - 4, 100 + p.y - p.s / 2]
+                  }}
+                  transition={{
+                    repeat: Infinity,
+                    duration: 2.2 + (i % 3) * 0.4,
+                    delay: p.delay,
+                    ease: "easeInOut"
+                  }}
+                />
+              ))}
+
+              {/* Medallion Core Base & Shadows */}
+              <circle cx="100" cy="100" r="83" fill="#15120a" opacity="0.1" />
+              
+              {/* Outer Golden Rim Ring */}
               <circle 
                 cx="100" 
                 cy="100" 
-                r="64" 
+                r="81" 
                 fill="none" 
-                stroke="#13110e" 
-                strokeWidth="5" 
+                stroke="url(#gold-rim-grad)" 
+                strokeWidth="7" 
               />
+
+              {/* Fine Inner Accent Inset Border */}
               <circle 
                 cx="100" 
                 cy="100" 
-                r="64" 
+                r="77.5" 
                 fill="none" 
-                stroke="rgba(245,158,11,0.04)" 
-                strokeWidth="8" 
+                stroke="#181308" 
+                strokeWidth="1.2" 
               />
 
-              {/* Glowing Active Arc */}
-              <motion.circle
-                cx="100"
-                cy="100"
-                r="64"
-                fill="none"
-                stroke="url(#active-gold-grad)"
-                strokeWidth="5"
-                strokeLinecap="round"
-                strokeDasharray={2 * Math.PI * 64}
-                animate={{ strokeDashoffset: (2 * Math.PI * 64) - (visualProgress / 100) * (2 * Math.PI * 64) }}
-                transition={{ ease: "easeOut", duration: 0.1 }}
-                filter="url(#gold-glow)"
+              {/* Inner Gold Rim Bevel Highlight */}
+              <circle 
+                cx="100" 
+                cy="100" 
+                r="76" 
+                fill="none" 
+                stroke="url(#gold-inner-rim-grad)" 
+                strokeWidth="2" 
               />
 
-              {/* Floating digital pixels/particles around the perimeter */}
-              <rect x="42" y="38" width="2" height="2" fill="#f59e0b" opacity="0.3" />
-              <rect x="154" y="60" width="3" height="3" fill="#f59e0b" opacity="0.4" />
-              <rect x="162" y="94" width="2" height="2" fill="#f59e0b" opacity="0.5" />
-              <rect x="34" y="116" width="3" height="3" fill="#fbbf24" opacity="0.25" />
-              <rect x="148" y="136" width="2" height="2" fill="#f59e0b" opacity="0.4" />
-              <rect x="76" y="158" width="2.5" height="2.5" fill="#fbbf24" opacity="0.3" />
+              {/* Matte Dark Inner Center Background */}
+              <circle 
+                cx="100" 
+                cy="100" 
+                r="73.5" 
+                fill="#0f0e0c" 
+              />
 
-              {/* Sparkling Emitter Tip Particles */}
-              {visualProgress > 0 && visualProgress < 100 && (
-                <>
-                  <motion.rect
-                    x={headX - 1.5}
-                    y={headY - 1.5}
-                    width="3"
-                    height="3"
-                    fill="#ffe066"
-                    filter="url(#gold-glow)"
-                    animate={{ 
-                      x: headX - 1.5 + Math.sin(visualProgress * 0.5) * 5, 
-                      y: headY - 1.5 + Math.cos(visualProgress * 0.5) * 5,
-                      opacity: [1, 0.7, 0],
-                      scale: [1, 1.2, 0]
-                    }}
-                    transition={{ repeat: Infinity, duration: 0.6 }}
-                  />
-                  <motion.rect
-                    x={headX - 1}
-                    y={headY - 1}
-                    width="2.5"
-                    height="2.5"
-                    fill="#f59e0b"
-                    animate={{ 
-                      x: headX - 1 + Math.cos(visualProgress * 0.7) * 7, 
-                      y: headY - 1 + Math.sin(visualProgress * 0.7) * 7,
-                      opacity: [1, 0.5, 0],
-                      scale: [1, 0.8, 0]
-                    }}
-                    transition={{ repeat: Infinity, duration: 0.8 }}
-                  />
-                </>
-              )}
 
-              {/* Centered Pixel Gih Logo group */}
+
+              {/* Centered Pixel Gih Logo group (Exquisite 3D Block Extrusion & Glow) */}
               <g transform="translate(64, 84)">
-                {/* 3D shadow extrusion underneath */}
-                <g transform="translate(1.5, 2)" opacity="0.95">
-                  {/* G Shadow */}
-                  <path d="M 2,2 h 28 v 8 h -20 v 14 h 14 v -4 h -6 v -4 h 12 v 14 h -28 Z" fill="#3b2707" />
-                  {/* i Shadow */}
-                  <path d="M 36,14 h 8 v 16 h -8 Z M 36,2 h 8 v 8 h -8 Z" fill="#3b2707" />
-                  {/* h Shadow */}
-                  <path d="M 48,2 h 8 v 28 h -8 Z M 56,14 h 16 v 8 h -16 Z M 64,20 h 8 v 10 h -8 Z" fill="#3b2707" />
-                </g>
+                {/* Beautiful 3D Solid Drop Shadow/Side Walls via multi-layer offset stack */}
+                {[1, 2, 3, 4, 5, 6].map((offset) => (
+                  <g key={offset} transform={`translate(${offset * 0.75}, ${offset * 0.75})`}>
+                    {/* G side wall shadow */}
+                    <path d="M 2,2 h 28 v 8 h -20 v 14 h 14 v -4 h -6 v -4 h 12 v 14 h -28 Z" fill="#3d2605" />
+                    {/* i side wall shadow */}
+                    <path d="M 36,14 h 8 v 16 h -8 Z M 36,2 h 8 v 8 h -8 Z" fill="#3d2605" />
+                    {/* h side wall shadow */}
+                    <path d="M 48,2 h 8 v 28 h -8 Z M 56,14 h 16 v 8 h -16 Z M 64,20 h 8 v 10 h -8 Z" fill="#3d2605" />
+                  </g>
+                ))}
 
-                {/* Front Golden Letters */}
+                {/* Symmetrical front face of Gih with elegant bevel border highlight */}
                 <g>
-                  {/* G Front */}
-                  <path d="M 2,2 h 28 v 8 h -20 v 14 h 14 v -4 h -6 v -4 h 12 v 14 h -28 Z" fill="url(#gold-text-grad)" />
+                  {/* G Front Face */}
+                  <path 
+                    d="M 2,2 h 28 v 8 h -20 v 14 h 14 v -4 h -6 v -4 h 12 v 14 h -28 Z" 
+                    fill="url(#gih-gold-front)" 
+                    stroke="#fffae0"
+                    strokeWidth="0.5"
+                    strokeLinejoin="miter"
+                  />
                   
-                  {/* Creeper Hollow cavity details inside G */}
+                  {/* Creeper Hollow Inside the G Cavity */}
                   <rect x="10" y="10" width="14" height="10" fill="#130e05" />
-                  <rect x="12" y="11" width="10" height="8" fill="url(#gold-text-grad)" />
-                  <rect x="13" y="12" width="2" height="2" fill="#110d05" />
-                  <rect x="17" y="12" width="2" height="2" fill="#110d05" />
-                  <rect x="15" y="14" width="2" height="3" fill="#110d05" />
-                  <rect x="14" y="15" width="4" height="2" fill="#110d05" />
+                  <rect x="12" y="11" width="10" height="8" fill="url(#gih-gold-front)" />
+                  
+                  {/* Pixel-perfect creeper features */}
+                  <rect x="13" y="12" width="2" height="2" fill="#130e05" />
+                  <rect x="17" y="12" width="2" height="2" fill="#130e05" />
+                  <rect x="15" y="14" width="2" height="3" fill="#130e05" />
+                  <rect x="14" y="15" width="4" height="2" fill="#130e05" />
 
-                  {/* i Front */}
-                  <path d="M 36,14 h 8 v 16 h -8 Z M 36,2 h 8 v 8 h -8 Z" fill="url(#gold-text-grad)" />
+                  {/* i Front Face */}
+                  <path 
+                    d="M 36,14 h 8 v 16 h -8 Z M 36,2 h 8 v 8 h -8 Z" 
+                    fill="url(#gih-gold-front)" 
+                    stroke="#fffae0"
+                    strokeWidth="0.5"
+                    strokeLinejoin="miter"
+                  />
 
-                  {/* h Front */}
-                  <path d="M 48,2 h 8 v 28 h -8 Z M 56,14 h 16 v 8 h -16 Z M 64,20 h 8 v 10 h -8 Z" fill="url(#gold-text-grad)" />
+                  {/* h Front Face */}
+                  <path 
+                    d="M 48,2 h 8 v 28 h -8 Z M 56,14 h 16 v 8 h -16 Z M 64,20 h 8 v 10 h -8 Z" 
+                    fill="url(#gih-gold-front)" 
+                    stroke="#fffae0"
+                    strokeWidth="0.5"
+                    strokeLinejoin="miter"
+                  />
                 </g>
               </g>
             </svg>
-
-            {/* Float percentage directly in center, or let Gih stand alone. In the image, percentage is not shown, let's keep Gih absolute clean and elegant! */}
           </div>
 
-          {/* Symmetrical LOADING Text Block with Square Accents */}
-          <div className="flex items-center justify-center gap-2.5 w-full mt-4 select-none">
-            <div className="h-[1.5px] w-8 bg-gradient-to-r from-transparent to-amber-500/40" />
-            <div className="w-1.5 h-1.5 bg-amber-500/80 rotate-45 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
+          {/* Symmetrical LOADING Text Block with Gray Lines & Square Accents, exactly like the image */}
+          <div className="flex items-center justify-center gap-3.5 w-full mt-4 select-none">
+            <div className="h-[1px] w-12 bg-gradient-to-r from-transparent to-zinc-200" />
+            <div className="w-1.5 h-1.5 border border-amber-500 bg-amber-500/10 rotate-45" />
             
-            <span className="font-mono text-[9px] font-black tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-100 uppercase pl-0.5">
-              LOADING
+            <span className="font-mono text-[10px] font-black tracking-[0.45em] text-amber-500 uppercase pl-1">
+              LOADING...
             </span>
             
-            <div className="w-1.5 h-1.5 bg-amber-500/80 rotate-45 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
-            <div className="h-[1.5px] w-8 bg-gradient-to-l from-transparent to-amber-500/40" />
-          </div>
-
-          {/* Beautiful Minecraft 3D Grass Block with Symmetrical Lines */}
-          <div className="flex items-center justify-center gap-3 w-full mt-6 select-none">
-            <div className="h-[1px] w-12 bg-gradient-to-r from-transparent via-amber-500/10 to-amber-500/25" />
-            <div className="w-1 h-1 bg-amber-500/30 rotate-45" />
-
-            {/* Isometric Grass Block */}
-            <div className="w-9 h-9 drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)]">
-              <svg viewBox="0 0 64 64" className="w-full h-full">
-                {/* Top Face - Grass */}
-                <polygon 
-                  points="32,12 54,23 32,34 10,23" 
-                  fill="#5c8e32" 
-                  stroke="#6b9e3b" 
-                  strokeWidth="0.5"
-                />
-                {/* Left Face - Dirt */}
-                <polygon 
-                  points="10,23 32,34 32,54 10,43" 
-                  fill="#573d26" 
-                />
-                {/* Right Face - Dirt (shaded) */}
-                <polygon 
-                  points="32,34 54,23 54,43 32,54" 
-                  fill="#44301e" 
-                />
-                {/* Left Grass overhang (jagged blocky style) */}
-                <polygon 
-                  points="10,23 32,34 32,40 28,38 26,41 21,38 18,35 14,38 10,34" 
-                  fill="#5c8e32" 
-                />
-                {/* Right Grass overhang */}
-                <polygon 
-                  points="32,34 54,23 54,34 50,37 47,34 43,38 39,35 32,39" 
-                  fill="#4e792a" 
-                />
-              </svg>
-            </div>
-
-            <div className="w-1 h-1 bg-amber-500/30 rotate-45" />
-            <div className="h-[1px] w-12 bg-gradient-to-l from-transparent via-amber-500/10 to-amber-500/25" />
-          </div>
-
-          {/* Super clean progress status message with no emojis */}
-          <div className="min-h-[32px] flex flex-col justify-center w-full mt-4 select-none px-1">
-            <p className="text-[10px] font-bold text-zinc-500 tracking-wide">
-              {language === 'ar' ? activeMsg.ar : activeMsg.en}
-            </p>
+            <div className="w-1.5 h-1.5 border border-amber-500 bg-amber-500/10 rotate-45" />
+            <div className="h-[1px] w-12 bg-gradient-to-l from-transparent to-zinc-200" />
           </div>
         </motion.div>
       </div>
@@ -1872,8 +2022,10 @@ const AppContent = () => {
             setActiveMainTab('home');
             setActiveSubTab('home');
             setSelectedCategory('الكل');
+            handleGihNamePointsClaim();
           }}
           className="flex items-center gap-3 cursor-pointer select-none"
+          title={language === 'ar' ? 'اضغط للحصول على 10 نقاط مكافأة يومية! 🎁' : 'Click to claim 10 daily bonus points! 🎁'}
         >
           {generalSettings.siteLogo ? (
             <img 
@@ -1883,28 +2035,12 @@ const AppContent = () => {
               referrerPolicy="no-referrer"
             />
           ) : (
-            <svg className="w-8 h-8 shrink-0 hover:scale-105 transition-transform" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M50 15 L85 32 L50 49 L15 32 Z" fill="url(#topGrad)" stroke="#111" strokeWidth="2.5" strokeLinejoin="round"/>
-              <path d="M15 32 L50 49 L50 82 L15 65 Z" fill="url(#leftGrad)" stroke="#111" strokeWidth="2.5" strokeLinejoin="round"/>
-              <path d="M50 49 L85 32 L85 65 L50 82 Z" fill="url(#rightGrad)" stroke="#111" strokeWidth="2.5" strokeLinejoin="round"/>
-              <path d="M30 40 L50 50" stroke="#f59e0b" strokeWidth="2" strokeOpacity="0.4" />
-              <path d="M70 40 L50 50" stroke="#fbbf24" strokeWidth="2" strokeOpacity="0.4" />
-              <path d="M50 50 L50 70" stroke="#d97706" strokeWidth="2" strokeOpacity="0.4" />
-              <defs>
-                <linearGradient id="topGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#fef08a" />
-                  <stop offset="100%" stopColor="#f59e0b" />
-                </linearGradient>
-                <linearGradient id="leftGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#b45309" />
-                  <stop offset="100%" stopColor="#78350f" />
-                </linearGradient>
-                <linearGradient id="rightGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#d97706" />
-                  <stop offset="100%" stopColor="#92400e" />
-                </linearGradient>
-              </defs>
-            </svg>
+            <img 
+              src={gihEarthLogo} 
+              alt={generalSettings.siteName || 'Logo'} 
+              className="w-9 h-9 object-cover rounded-xl hover:scale-110 transition-transform shadow-md shadow-amber-500/10 border border-zinc-800"
+              referrerPolicy="no-referrer"
+            />
           )}
           <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-250 to-amber-500 font-sans tracking-tight">
             {generalSettings.siteName || 'Golden'}
@@ -2014,34 +2150,43 @@ const AppContent = () => {
         {/* Left Side: Actions and Controls */}
         <div className="flex items-center gap-3">
           {/* Profile Picture / User Profile Button */}
-          <button
-            onClick={() => {
-              if (user) {
-                setShowUserPanel(true);
-              } else {
-                setLoginMode('email-signin');
-                setShowLoginModal(true);
-              }
-            }}
-            className="w-9 h-9 rounded-xl overflow-hidden border border-zinc-800/80 hover:border-amber-500 hover:shadow-lg hover:shadow-amber-500/10 transition-all cursor-pointer relative group flex items-center justify-center bg-zinc-950"
-            title={language === 'ar' ? 'حسابك الشخصي' : 'Your Profile'}
-          >
-            <img 
-              src={user ? (userProfile?.photoURL || "https://mc-heads.net/avatar/MHF_Steve/64") : "https://mc-heads.net/avatar/MHF_Steve/64"} 
-              alt="Profile" 
-              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-              referrerPolicy="no-referrer"
-            />
-            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border border-[#060608] rounded-full shadow-sm shadow-black" />
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => {
+                if (user) {
+                  setShowUserPanel(true);
+                } else {
+                  setLoginMode('email-signin');
+                  setShowLoginModal(true);
+                }
+              }}
+              className="w-9 h-9 rounded-xl overflow-hidden border border-amber-500 ring-2 ring-amber-500/20 hover:border-amber-400 hover:ring-amber-400/30 hover:shadow-lg hover:shadow-amber-500/25 transition-all cursor-pointer group flex items-center justify-center bg-zinc-950"
+              title={language === 'ar' ? 'حسابك الشخصي' : 'Your Profile'}
+            >
+              <img 
+                src={user ? (userProfile?.photoURL || "https://mc-heads.net/avatar/MHF_Steve/64") : "https://mc-heads.net/avatar/MHF_Steve/64"} 
+                alt="Profile" 
+                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                referrerPolicy="no-referrer"
+              />
+            </button>
+            {/* Golden radiance coming out next to it */}
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-amber-400 rounded-full animate-ping opacity-70 pointer-events-none z-0" />
+            {/* Glowing Golden indicator */}
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-gradient-to-r from-amber-500 to-yellow-400 border border-zinc-950 rounded-full shadow-md shadow-amber-500/40 z-10" />
+          </div>
 
           {/* Points Counter Badge */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl text-xs font-black select-none shadow-md shadow-amber-950/10 mr-1 ml-1">
-            <Coins className="w-3.5 h-3.5 text-amber-500" />
+          <button
+            onClick={handleShareWebsite}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-400 rounded-xl text-xs font-black transition-all cursor-pointer shadow-md hover:shadow-amber-500/5 hover:scale-105 active:scale-95 shadow-amber-950/10 mr-1 ml-1"
+            title={language === 'ar' ? 'اضغط لمشاركة الموقع مع أصدقائك 🚀' : 'Click to share the website with friends 🚀'}
+          >
+            <Coins className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
             <span>
               {totalPoints} {language === 'ar' ? 'نقطة' : 'Pts'}
             </span>
-          </div>
+          </button>
 
           {/* Three-dots consolidated dropdown */}
           <div className="relative">
@@ -2178,41 +2323,7 @@ const AppContent = () => {
                     </div>
                   </button>
 
-                  {/* 5. Suggest a Mod */}
-                  <button
-                    onClick={() => {
-                      setShowThreeDotsMenu(false);
-                      setShowSuggestModal(true);
-                    }}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
-                      localTheme === 'light'
-                        ? 'text-zinc-700 hover:bg-zinc-100'
-                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <Sparkles className="w-4 h-4 text-red-500 shrink-0" />
-                      <span>{language === 'ar' ? 'تقديم اقتراح لمود جديد 💡' : 'Suggest a New Mod 💡'}</span>
-                    </div>
-                  </button>
 
-                  {/* 6. View Suggestions */}
-                  <button
-                    onClick={() => {
-                      setShowThreeDotsMenu(false);
-                      setShowListModal(true);
-                    }}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
-                      localTheme === 'light'
-                        ? 'text-zinc-700 hover:bg-zinc-100'
-                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <ClipboardList className="w-4 h-4 text-red-500 shrink-0" />
-                      <span>{language === 'ar' ? 'قائمة اقتراحات الأعضاء 📂' : 'Open Member Suggestions 📂'}</span>
-                    </div>
-                  </button>
 
                   {/* 5. Theme Settings */}
                   <div className={`border-t my-1.5 pt-2 px-1 ${localTheme === 'light' ? 'border-zinc-100' : 'border-zinc-900'}`}>
@@ -2339,6 +2450,8 @@ const AppContent = () => {
                 setShowSuggestModal={setShowSuggestModal}
                 showListModal={showListModal}
                 setShowListModal={setShowListModal}
+                games={games}
+                onSelectGame={setSelectedGameForDetails}
               />
 
 
@@ -2347,62 +2460,6 @@ const AppContent = () => {
                 <div className="space-y-12">
                   {displayedGames.length > 0 && (
                     <>
-                      {/* BROWSE SECTIONS / CATEGORIES MATCHING IMAGE */}
-                      <section className="space-y-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-                        <div className="flex items-center justify-between border-b border-zinc-900/40 pb-3">
-                          <div className="flex items-center gap-2.5">
-                            {/* Bento grid icon represented by 4 squares */}
-                            <div className="grid grid-cols-2 gap-0.5 w-5 h-5 shrink-0 text-[#f59e0b] fill-[#f59e0b]">
-                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
-                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
-                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
-                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
-                            </div>
-                            <h3 className="text-xl md:text-2xl font-black text-white tracking-tight">
-                              <span>{language === 'ar' ? 'تصفح الأقسام' : 'Browse Sections'}</span>
-                            </h3>
-                          </div>
-                        </div>
-
-                        {/* Slider Scrollable / Grid Area */}
-                        <div 
-                          id="categories-slider-rail"
-                          className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 w-full"
-                        >
-                          {[
-                            { id: 'mobs', labelAr: 'مودات الكائنات', labelEn: 'Mobs Mods', countAr: '156 مود', countEn: '156 Mods', icon: Ghost, refCategory: 'مودات', colorClass: 'text-purple-400 bg-purple-500/5 border-purple-500/10 hover:border-purple-500/30' },
-                            { id: 'world', labelAr: 'مودات العالم', labelEn: 'World Mods', countAr: '98 مود', countEn: '98 Mods', icon: Layers, refCategory: 'خرائط', colorClass: 'text-emerald-400 bg-emerald-500/5 border-emerald-500/10 hover:border-emerald-500/30' },
-                            { id: 'tools', labelAr: 'مودات الأدوات', labelEn: 'Tools Mods', countAr: '210 مود', countEn: '210 Mods', icon: Hammer, refCategory: 'موارد', colorClass: 'text-cyan-400 bg-cyan-500/5 border-cyan-500/10 hover:border-cyan-500/30' },
-                            { id: 'dragons', labelAr: 'مودات التنين', labelEn: 'Dragon Mods', countAr: '84 مود', countEn: '84 Mods', icon: Flame, refCategory: 'مودات', colorClass: 'text-green-400 bg-green-500/5 border-green-500/10 hover:border-green-500/30' },
-                            { id: 'adventures', labelAr: 'مودات المغامرات', labelEn: 'Adventure Mods', countAr: '91 مود', countEn: '91 Mods', icon: Sword, refCategory: 'مودات', colorClass: 'text-sky-400 bg-sky-500/5 border-sky-500/10 hover:border-sky-500/30' },
-                          ].map((cat, i) => {
-                            const IconComponent = cat.icon;
-                            return (
-                              <div 
-                                key={cat.id}
-                                onClick={() => {
-                                  setSelectedCategory(cat.refCategory);
-                                  const el = document.getElementById('available-mods-anchor');
-                                  if (el) el.scrollIntoView({ behavior: 'smooth' });
-                                }}
-                                className="bg-[#0c0c0e]/90 border border-zinc-900/60 rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-lg hover:shadow-amber-500/5 transition duration-150 group shrink-0"
-                              >
-                                {/* Glowing Centered Bubble for Icon Component */}
-                                <div className={`w-14 h-14 rounded-full flex items-center justify-center border ${cat.colorClass} mb-4 group-hover:scale-105 transition-transform`}>
-                                  <IconComponent className="w-6 h-6 stroke-[2]" />
-                                </div>
-                                <h4 className="text-sm font-black text-white group-hover:text-[#f59e0b] transition-colors">
-                                  {language === 'ar' ? cat.labelAr : cat.labelEn}
-                                </h4>
-                                <p className="text-[11px] text-zinc-500 font-bold mt-1">
-                                  {language === 'ar' ? cat.countAr : cat.countEn}
-                                </p>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </section>
-
                       {/* INTERACTIVE SPOTLIGHT DECK SPOTLIGHT */}
                       <section className="space-y-4">
                         <div className="flex items-center justify-between border-b border-zinc-90 w-full pb-3">
@@ -3927,6 +3984,7 @@ const AppContent = () => {
         isOpen={showAdminPanel} 
         onClose={() => setShowAdminPanel(false)} 
         onAddGame={handleAddGame}
+        onUpdateGame={handleUpdateGame}
         onDeleteGame={handleDeleteGame}
         onResolveReport={handleResolveReport}
         onDeleteReport={handleDeleteReport}
@@ -4379,10 +4437,17 @@ const AppContent = () => {
             >
               {/* Drawer Header */}
               <div className="flex items-center justify-between mb-6 pb-4 border-b border-zinc-800/20">
-                <div className="flex items-center gap-2.5">
-                  <div className="bg-gradient-to-r from-red-650 to-amber-500 p-2.5 rounded-xl shadow-lg shadow-red-600/10">
-                    <Gamepad2 className="w-5 h-5 text-white" />
-                  </div>
+                <div 
+                  onClick={handleGihNamePointsClaim}
+                  className="flex items-center gap-2.5 cursor-pointer select-none hover:scale-105 active:scale-95 transition-all duration-150"
+                  title={language === 'ar' ? 'اضغط للحصول على 10 نقاط مكافأة يومية! 🎁' : 'Click to claim 10 daily bonus points! 🎁'}
+                >
+                  <img 
+                    src={gihEarthLogo} 
+                    alt="Golden Gih" 
+                    className="w-10 h-10 object-cover rounded-xl shadow-lg border border-zinc-800"
+                    referrerPolicy="no-referrer"
+                  />
                   <div className="flex flex-col leading-tight text-right">
                     <span className="text-sm font-black tracking-tight uppercase">Golden Gih</span>
                     <span className="text-[10px] text-zinc-500 font-extrabold">{language === 'ar' ? 'المكتبة الأكبر للمودات' : 'Minecraft Mods Hub'}</span>
@@ -4494,7 +4559,7 @@ const AppContent = () => {
                             <img 
                               src={userProfile?.photoURL && userProfile.photoURL !== "" ? userProfile.photoURL : "https://mc-heads.net/avatar/MHF_Steve/64"} 
                               alt="" 
-                              className="w-12 h-12 rounded-xl object-cover border-2 border-red-550/20 shadow-md"
+                              className="w-12 h-12 rounded-xl object-cover border-2 border-amber-500 ring-2 ring-amber-500/20 shadow-md shadow-amber-500/10"
                             />
                             {userProfile?.email === 'frassa0000@gmail.com' && (
                               <div className="absolute -bottom-1 -right-1 bg-amber-500 text-white p-1 rounded-full shadow border border-zinc-950">
@@ -5398,6 +5463,7 @@ const AdminPanel = ({
   isOpen, 
   onClose, 
   onAddGame, 
+  onUpdateGame,
   onDeleteGame, 
   onResolveReport, 
   onDeleteReport,
@@ -5411,6 +5477,7 @@ const AdminPanel = ({
   isOpen: boolean; 
   onClose: () => void; 
   onAddGame: (data: Omit<Game, 'id'>) => void;
+  onUpdateGame: (id: string, data: Partial<Game>) => void;
   onDeleteGame: (id: string) => void;
   onResolveReport: (id: string, reply?: string) => void;
   onDeleteReport: (id: string) => void;
@@ -5441,7 +5508,7 @@ const AdminPanel = ({
   const [generalSettings, setGeneralSettings] = useState({
     siteName: 'جولدن',
     siteDescription: 'جولدن - محتوى ماين كرافت عربي مميز لأخبار، شروحات، مودات و كل ما يخص عالم ماين كرافت!',
-    siteLogo: '',
+    siteLogo: gihEarthLogo,
     siteUrl: 'https://golden-mc.com',
     adminEmail: 'admin@golden-mc.com',
     timezone: 'القاهرة (UTC+02:00)',
@@ -5585,6 +5652,7 @@ const AdminPanel = ({
     isPaid: false,
     price: ''
   });
+  const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [quickAddLink, setQuickAddLink] = useState('');
   
   const initPricingChat = () => {
@@ -5850,18 +5918,18 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+        className="absolute inset-0 bg-black"
       />
       
       <motion.div 
-        initial={{ scale: 0.95, opacity: 0 }}
+        initial={{ scale: 0.95, opacity: 1 }}
         animate={{ scale: 1, opacity: 1 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-5xl h-full md:h-[80vh] rounded-none md:rounded-[2.5rem] overflow-hidden relative z-10 flex flex-col shadow-2xl`}
       >
-        <div className={`p-4 md:p-6 border-b ${theme === 'light' ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-900 bg-zinc-900/50'} flex items-center justify-between`}>
+        <div className={`p-4 md:p-6 border-b ${theme === 'light' ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-900 bg-zinc-900'} flex items-center justify-between`}>
           <div className="flex items-center gap-3 md:gap-4">
             <div className="bg-red-600 p-2 rounded-xl">
               <Settings className="w-5 h-5 md:w-6 md:h-6 text-white" />
@@ -5982,13 +6050,34 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
                 </div>
 
                 {/* Manual Adder */}
-                <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl">
+                <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl" id="admin-games-form-container">
                   <div className="flex items-center justify-between mb-6">
                     <h3 className="text-xl font-bold flex items-center gap-2">
-                      <Plus className="w-5 h-5 text-red-500" />
-                      إضافة محتوى جديد
+                      {editingGameId ? (
+                        <>
+                          <Edit className="w-5 h-5 text-amber-500" />
+                          <span>{language === 'ar' ? `تعديل المحتوى: ${newGame.title}` : `Edit Content: ${newGame.title}`}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-5 h-5 text-red-500" />
+                          <span>إضافة محتوى جديد</span>
+                        </>
+                      )}
                     </h3>
                     <div className="flex items-center gap-2">
+                      {editingGameId && (
+                        <button 
+                          onClick={() => {
+                            setEditingGameId(null);
+                            setNewGame({ title: '', description: '', thumbnail: '', downloadUrl: '', category: 'مودات', rating: 5, edition: 'both' as 'java' | 'bedrock' | 'both', isPaid: false, price: '' });
+                            setModFileName('');
+                          }}
+                          className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-350 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer"
+                        >
+                          {language === 'ar' ? 'إلغاء التعديل ×' : 'Cancel Edit ×'}
+                        </button>
+                      )}
                       <input 
                         type="file" 
                         id="bulk-upload" 
@@ -6382,26 +6471,36 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
                         return;
                       }
                       try {
-                        await onAddGame({
-                          ...newGame,
-                          title: cleanTitle,
-                          downloadUrl: cleanDownloadUrl
-                        });
-                        alert(language === 'ar' ? 'تم رفع ونشر المود بنجاح!' : 'Mod uploaded and published successfully!');
+                        if (editingGameId) {
+                          await onUpdateGame(editingGameId, {
+                            ...newGame,
+                            title: cleanTitle,
+                            downloadUrl: cleanDownloadUrl
+                          });
+                          alert(language === 'ar' ? 'تم حفظ تعديلات المود بنجاح!' : 'Mod changes saved successfully!');
+                          setEditingGameId(null);
+                        } else {
+                          await onAddGame({
+                            ...newGame,
+                            title: cleanTitle,
+                            downloadUrl: cleanDownloadUrl
+                          });
+                          alert(language === 'ar' ? 'تم رفع ونشر المود بنجاح!' : 'Mod uploaded and published successfully!');
+                        }
                         setNewGame({ title: '', description: '', thumbnail: '', downloadUrl: '', category: 'مودات', rating: 5, edition: 'both' as 'java' | 'bedrock' | 'both', isPaid: false, price: '' });
                         setModFileName('');
                       } catch (err: any) {
-                        console.error("Error publishing mod:", err);
+                        console.error("Error saving mod:", err);
                         alert(language === 'ar' 
-                          ? 'حدث خطأ أثناء رفع المود. تفاصيل الخطأ:\n' + (err.message || err)
-                          : 'An error occurred while uploading. Details:\n' + (err.message || err)
+                          ? 'حدث خطأ أثناء حفظ المود. تفاصيل الخطأ:\n' + (err.message || err)
+                          : 'An error occurred while saving. Details:\n' + (err.message || err)
                         );
                       }
                     }}
                     disabled={imageLoading || isImageUnsafe}
-                    className="mt-6 w-full bg-red-600 hover:bg-red-500 text-white py-4 rounded-xl font-bold transition-all shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="mt-6 w-full bg-red-650 hover:bg-red-540 text-white py-4 rounded-xl font-bold transition-all shadow-lg shadow-red-650/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    {imageLoading ? 'جاري فحص الصورة بالذكاء الاصطناعي...' : 'نشر المحتوى الآن'}
+                    {imageLoading ? 'جاري فحص الصورة بالذكاء الاصطناعي...' : editingGameId ? 'حفظ تعديلات المود' : 'نشر المحتوى الآن'}
                   </button>
                 </div>
 
@@ -6432,12 +6531,39 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
                             </div>
                           </div>
                         </div>
-                        <button 
-                          onClick={() => onDeleteGame(game.id)}
-                          className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button 
+                            onClick={() => {
+                              setEditingGameId(game.id);
+                              setNewGame({
+                                title: game.title || '',
+                                description: game.description || '',
+                                thumbnail: game.thumbnail || '',
+                                downloadUrl: game.downloadUrl || '',
+                                category: game.category || 'مودات',
+                                rating: game.rating || 5,
+                                edition: game.edition || 'both',
+                                isPaid: game.isPaid || false,
+                                price: game.price || ''
+                              });
+                              const formEl = document.getElementById('admin-games-form-container');
+                              if (formEl) {
+                                formEl.scrollIntoView({ behavior: 'smooth' });
+                              }
+                            }}
+                            className="p-2 text-zinc-500 hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all cursor-pointer"
+                            title={language === 'ar' ? 'تعديل المود' : 'Edit Mod'}
+                          >
+                            <Edit3 className="w-4.5 h-4.5" />
+                          </button>
+                          <button 
+                            onClick={() => onDeleteGame(game.id)}
+                            className="p-2 text-zinc-650 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
+                            title={language === 'ar' ? 'حذف المود' : 'Delete Mod'}
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -6919,6 +7045,7 @@ const UserPanel = ({
   const [newBio, setNewBio] = useState('');
   const [newPhotoURL, setNewPhotoURL] = useState('');
   const [panelSaveSuccess, setPanelSaveSuccess] = useState(false);
+  const [copiedReferral, setCopiedReferral] = useState(false);
   const [reportMsg, setReportMsg] = useState('');
   const [assistantStep, setAssistantStep] = useState<1 | 2 | 3>(1);
   const [selectedSupportOption, setSelectedSupportOption] = useState<string>('');
@@ -6964,18 +7091,18 @@ const UserPanel = ({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+        className="absolute inset-0 bg-black"
       />
       
       <motion.div 
-        initial={{ scale: 0.95, opacity: 0 }}
+        initial={{ scale: 0.95, opacity: 1 }}
         animate={{ scale: 1, opacity: 1 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-4xl h-full md:h-[70vh] rounded-none md:rounded-[2.5rem] overflow-hidden relative z-10 flex flex-col shadow-2xl`}
       >
-        <div className={`p-4 md:p-6 border-b ${theme === 'light' ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-900 bg-zinc-900/50'} flex items-center justify-between`}>
+        <div className={`p-4 md:p-6 border-b ${theme === 'light' ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-900 bg-zinc-900'} flex items-center justify-between`}>
           <div className="flex items-center gap-3 md:gap-4">
             <div className="bg-red-600 p-2 rounded-xl text-white">
               <UserCog className="w-5 h-5 md:w-6 md:h-6" />
@@ -7173,6 +7300,66 @@ const UserPanel = ({
                     >
                       حفظ جميع التغييرات
                     </button>
+                  </div>
+                </div>
+
+                {/* Referral Invitation System Card */}
+                <div className="bg-gradient-to-br from-amber-500/10 via-amber-600/5 to-zinc-950/40 border border-amber-500/20 p-6 rounded-3xl space-y-5 text-right font-semibold animate-fade-in" dir="rtl">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-amber-500/15 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500">
+                        <Gift className="w-5 h-5" />
+                      </div>
+                      <div className="text-right">
+                        <h4 className="font-black text-sm text-amber-400">🎁 نظام دعوة الأصدقاء ومضاعفة النقاط</h4>
+                        <p className="text-[10px] text-zinc-500 mt-0.5">شارك رابطك واكسب 40 نقطة ذهبية مجانية عن كل صديق!</p>
+                      </div>
+                    </div>
+                    <div className="bg-amber-500/10 border border-amber-500/20 px-3.5 py-1.5 rounded-2xl text-xs font-black text-amber-500 flex items-center gap-1.5 self-end sm:self-auto select-none">
+                      <Users className="w-4 h-4" />
+                      <span>الأصدقاء المدعوون: {profile.referralsCount || 0}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-zinc-400 leading-relaxed font-semibold">
+                    كل صديق جديد يقوم بالتسجيل في موقعنا عبر رابطك الخاص أدناه، ستحصل أنت فوراً على <span className="text-amber-400 font-extrabold">+40 نقطة</span> في محفظتك! ولتسهيل الأمر على أصدقائك، سيحصل صديقك المدعو أيضاً على <span className="text-amber-400 font-extrabold">+40 نقطة</span> مجانية كمكافأة ترحيبية لشراء وتحميل المودات المتميزة فوراً! 🎉
+                  </p>
+
+                  <div className="space-y-2 text-right">
+                    <label className="text-xs text-zinc-500 font-extrabold mr-1">رابط الدعوة الخاص بك (الرابط الفريد)</label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input 
+                        type="text" 
+                        readOnly
+                        value={`${window.location.origin}?ref=${profile.uid}`}
+                        className="flex-1 bg-zinc-950 border border-zinc-850 rounded-xl p-3 text-xs focus:border-amber-600 outline-none transition-all font-semibold text-left select-all font-mono"
+                        dir="ltr"
+                      />
+                      <button
+                        onClick={() => {
+                          try {
+                            navigator.clipboard.writeText(`${window.location.origin}?ref=${profile.uid}`);
+                            setCopiedReferral(true);
+                            setTimeout(() => setCopiedReferral(false), 2000);
+                          } catch (err) {
+                            console.error("Failed to copy link:", err);
+                          }
+                        }}
+                        className={`px-6 py-3 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer ${copiedReferral ? 'bg-green-600 text-white shadow-lg shadow-green-600/20' : 'bg-amber-500 hover:bg-amber-450 text-black shadow-lg shadow-amber-500/15'}`}
+                      >
+                        {copiedReferral ? (
+                          <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>تم النسخ!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Share2 className="w-4 h-4" />
+                            <span>نسخ رابط الدعوة</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -7664,14 +7851,14 @@ const ContactModal = ({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+        className="absolute inset-0 bg-black"
       />
       
       <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        initial={{ scale: 0.9, opacity: 1, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-lg rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
@@ -7733,20 +7920,20 @@ export const PrivacyModal = ({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+        className="absolute inset-0 bg-black"
       />
       
       <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        initial={{ scale: 0.9, opacity: 1, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
         <div className={`p-8 pt-10 ${language === 'ar' ? 'text-right' : 'text-left'} max-h-[80vh] overflow-y-auto scrollbar-none`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
-          <div className="bg-red-650/10 border border-red-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Lock className="w-7 h-7 text-red-500" />
+          <div className="bg-red-650 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-7 h-7 text-white" />
           </div>
           
           <h2 className={`text-2xl font-black text-center mb-6 tracking-tighter ${theme === 'light' ? 'text-zinc-900' : 'text-zinc-100'}`}>
@@ -7754,7 +7941,7 @@ export const PrivacyModal = ({
           </h2>
           
           <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-800 text-zinc-300'}`}>
               <h3 className="font-black text-red-500 mb-2">
                 {language === 'ar' ? '1. جمع وإدارة البيانات' : '1. Data Collection & Management'}
               </h3>
@@ -7765,7 +7952,7 @@ export const PrivacyModal = ({
               </p>
             </div>
 
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-800 text-zinc-300'}`}>
               <h3 className="font-black text-red-500 mb-2">
                 {language === 'ar' ? '2. أمان الملفات والمودات' : '2. Mod & File Safety'}
               </h3>
@@ -7776,7 +7963,7 @@ export const PrivacyModal = ({
               </p>
             </div>
 
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-800 text-zinc-300'}`}>
               <h3 className="font-black text-red-500 mb-2">
                 {language === 'ar' ? '3. ملفات تعريف الارتباط و LocalStorage' : '3. Cookies & Local Storage'}
               </h3>
@@ -7815,20 +8002,20 @@ export const TermsModal = ({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+        className="absolute inset-0 bg-black"
       />
       
       <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        initial={{ scale: 0.9, opacity: 1, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
         <div className={`p-8 pt-10 ${language === 'ar' ? 'text-right' : 'text-left'} max-h-[80vh] overflow-y-auto scrollbar-none`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
-          <div className="bg-red-650/10 border border-red-500/20 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <ClipboardList className="w-7 h-7 text-red-500" />
+          <div className="bg-red-650 w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <ClipboardList className="w-7 h-7 text-white" />
           </div>
           
           <div className="hidden" /> {/* Spacer */}
@@ -7837,7 +8024,7 @@ export const TermsModal = ({
           </h2>
           
           <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-800 text-zinc-300'}`}>
               <h3 className="font-black text-red-500 mb-2">
                 {language === 'ar' ? '1. الاستخدام العادل والمسموح' : '1. Fair & Allowable Use'}
               </h3>
@@ -7848,7 +8035,7 @@ export const TermsModal = ({
               </p>
             </div>
 
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-800 text-zinc-300'}`}>
               <h3 className="font-black text-red-500 mb-2">
                 {language === 'ar' ? '2. رفع المحتوى والملفات' : '2. File Uploading & Hosting'}
               </h3>
@@ -7859,7 +8046,7 @@ export const TermsModal = ({
               </p>
             </div>
 
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-800 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-800 text-zinc-300'}`}>
               <h3 className="font-black text-red-500 mb-2">
                 {language === 'ar' ? '3. إخلاء وتبرئة المسؤولية' : '3. Direct Disclaimers'}
               </h3>
@@ -7898,14 +8085,14 @@ export const AboutModal = ({
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0 }}
+        initial={{ opacity: 1 }}
         animate={{ opacity: 1 }}
         onClick={onClose}
-        className="absolute inset-0 bg-black/95 backdrop-blur-md"
+        className="absolute inset-0 bg-black"
       />
       
       <motion.div 
-        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        initial={{ scale: 0.9, opacity: 1, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         className={`${theme === 'light' ? 'bg-white text-zinc-900 border-zinc-200' : 'bg-zinc-950 text-white border-zinc-800'} border w-full max-w-2xl rounded-[2.5rem] overflow-hidden relative z-10 shadow-2xl`}
       >
@@ -7922,7 +8109,7 @@ export const AboutModal = ({
           </p>
           
           <div className={`space-y-6 text-sm font-semibold leading-relaxed ${theme === 'light' ? 'text-zinc-700' : 'text-zinc-300'}`}>
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-805 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-805 text-zinc-300'}`}>
               <h3 className={`font-black text-red-500 mb-2 flex items-center gap-1.5 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
                 {language === 'ar' ? null : <Sparkles className="w-4 h-4 text-amber-500" />}
                 <span>{language === 'ar' ? 'البداية والرؤية' : 'The Vision & Start'}</span>
@@ -7935,7 +8122,7 @@ export const AboutModal = ({
               </p>
             </div>
 
-            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900/40 border border-zinc-805 text-zinc-300'}`}>
+            <div className={`p-5 rounded-2xl ${theme === 'light' ? 'bg-zinc-50 border border-zinc-200 text-zinc-800' : 'bg-zinc-900 border border-zinc-805 text-zinc-300'}`}>
               <h3 className={`font-black text-red-500 mb-2 flex items-center gap-1.5 ${language === 'ar' ? 'justify-end' : 'justify-start'}`}>
                 {language === 'ar' ? null : <Crown className="w-4 h-4 text-amber-500" />}
                 <span>{language === 'ar' ? 'مميزات وإحصائيات الأعضاء' : 'Member Features & Stats'}</span>

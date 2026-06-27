@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
   addDoc, 
@@ -18,6 +18,10 @@ import {
   UploadCloud, 
   X, 
   ThumbsUp, 
+  ThumbsDown,
+  ChevronUp,
+  ChevronDown,
+  ChevronsUpDown,
   Trash, 
   Loader2, 
   Star,
@@ -50,6 +54,8 @@ interface HeroSectionProps {
   setShowSuggestModal?: (val: boolean) => void;
   showListModal?: boolean;
   setShowListModal?: (val: boolean) => void;
+  games?: any[];
+  onSelectGame?: (game: any) => void;
 }
 
 interface Suggestion {
@@ -62,6 +68,9 @@ interface Suggestion {
   createdAt: string;
   votes: number;
   voters: string[];
+  upvoters?: string[];
+  downvoters?: string[];
+  edition?: 'java' | 'bedrock' | 'both';
   status: 'pending' | 'approved' | 'rejected';
 }
 
@@ -74,44 +83,72 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
   setShowSuggestModal: propsSetShowSuggestModal,
   showListModal: propsShowListModal,
   setShowListModal: propsSetShowListModal,
+  games = [],
+  onSelectGame,
 }) => {
   const isRTL = language === 'ar';
 
-  const slides = [
+  // Fallback data in case database list hasn't finished loading yet or is empty
+  const FALLBACK_GAMES = [
     {
-      id: 0,
-      titleAr: 'أهلاً بك في',
-      accentAr: 'جولدن',
-      subtitleAr: 'بوابتك المفضلة لأقوى وأحدث مودات وإضافات ماين كرافت المتميزة',
-      titleEn: 'Welcome to',
-      accentEn: 'Golden',
-      subtitleEn: 'Your ultimate gateway to premium and updated Minecraft mods & additions',
-      image: backgroundImage || minecraftHero,
+      id: "chaos-cubed",
+      title: "Chaos Cubed: Cursed Cubes",
+      description: "إضافة مكعبات الفوضى واللعنات الجديدة لماين كرافت بأشكال وقدرات رهيبة وممتعة في العالم الافتراضي.",
+      thumbnail: "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=400&auto=format&fit=crop",
+      category: "مودات",
+      rating: 4.8,
+      edition: "both",
+      downloads: "150K",
+      version: "1.20+",
     },
     {
-      id: 1,
-      titleAr: 'أقوى وأحدث',
-      accentAr: 'مودات كرافت',
-      subtitleAr: 'سكنات، خرائط، شيدرز، وموارد متنوعة وحصرية جاهزة للتحميل المباشر',
-      titleEn: 'Premium & Updated',
-      accentEn: 'Craft Mods',
-      subtitleEn: 'Skins, maps, shaders, and various exclusive resources ready for direct download',
-      image: 'https://images.unsplash.com/photo-1627856013091-fed6e4e30025?q=80&w=1200&auto=format&fit=crop',
+      id: "herschel-backpack",
+      title: "Herschel Backpack Trials",
+      description: "إضافة حزم وحقائب هيرشل للمغامرات والاستكشاف الأسطوري وزيادة مساحة التخزين الخاصة بك للترحال.",
+      thumbnail: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=400&auto=format&fit=crop",
+      category: "مودات",
+      rating: 4.9,
+      edition: "both",
+      downloads: "490K",
+      version: "1.20+",
     },
     {
-      id: 2,
-      titleAr: 'اشترك معنا و',
-      accentAr: 'تابع صفحاتنا على السوشيال',
-      subtitleAr: 'انضم لمجتمع ديسكورد وحساباتنا الرسمية لتصلك أحدث المودات والتحديثات فوراً',
-      titleEn: 'Join Us &',
-      accentEn: 'Follow Our Social Pages',
-      subtitleEn: 'Connect with our official Discord and social channels for instant updates',
-      image: 'https://images.unsplash.com/photo-1611162617213-7d7a39e9b1d7?q=80&w=1200&auto=format&fit=crop',
+      id: "actions-and-stuff",
+      title: "Actions & Stuff 1.11",
+      description: "تعديل رائع لإضافة حركات قتالية وأكشن واقعي للاعبين مع تحسين الأداء والحركات الفيزيائية لضرب الموبات.",
+      thumbnail: "https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=400&auto=format&fit=crop",
+      category: "شيدرز",
+      rating: 5.0,
+      edition: "both",
+      downloads: "2.4M",
+      version: "1.20+",
     }
   ];
 
+  // Dynamic random list of 3 mods stably memoized per games update
+  const carouselMods = React.useMemo(() => {
+    const list = games && games.length > 0 ? games : FALLBACK_GAMES;
+    if (list.length === 0) return [];
+    
+    // Sort pseudo-randomly using title string hash to keep it stable but random-looking across renders
+    const shuffled = [...list];
+    shuffled.sort((a, b) => {
+      const hashA = a.title.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+      const hashB = b.title.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+      return (hashA % 7) - (hashB % 7);
+    });
+    return shuffled.slice(0, 3);
+  }, [games]);
+
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
+
+  // Reset slide if it exceeds length
+  useEffect(() => {
+    if (currentSlide >= carouselMods.length) {
+      setCurrentSlide(0);
+    }
+  }, [carouselMods.length, currentSlide]);
 
   // Controlled states for modals
   const [internalShowSuggest, setInternalShowSuggest] = useState(false);
@@ -132,6 +169,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
   const [suggestForm, setSuggestForm] = useState({
     title: '',
     category: 'مودات',
+    edition: 'both' as 'java' | 'bedrock' | 'both',
     description: '',
     downloadUrl: '',
     suggestedBy: userEmail || ''
@@ -178,28 +216,31 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       setSuggestions(list);
     }, (error) => {
       console.error("Firestore Error in suggestions: ", error);
+      handleFirestoreError(error, OperationType.GET, 'suggestions');
     });
     return () => unsubscribe();
   }, []);
 
   // Auto-play interval
   useEffect(() => {
-    if (isHovered || showSuggestModal || showListModal || showUploadModal) return;
+    if (isHovered || showSuggestModal || showListModal || showUploadModal || carouselMods.length === 0) return;
     const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % slides.length);
+      setCurrentSlide((prev) => (prev + 1) % carouselMods.length);
     }, 5500);
     return () => clearInterval(interval);
-  }, [isHovered, slides.length, showSuggestModal, showListModal, showUploadModal]);
+  }, [isHovered, carouselMods.length, showSuggestModal, showListModal, showUploadModal]);
 
   const handlePrev = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
-  }, [slides.length]);
+    if (carouselMods.length === 0) return;
+    setCurrentSlide((prev) => (prev - 1 + carouselMods.length) % carouselMods.length);
+  }, [carouselMods.length]);
 
   const handleNext = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    setCurrentSlide((prev) => (prev + 1) % slides.length);
-  }, [slides.length]);
+    if (carouselMods.length === 0) return;
+    setCurrentSlide((prev) => (prev + 1) % carouselMods.length);
+  }, [carouselMods.length]);
 
   // Submit Suggestion
   const handleSuggestSubmit = async (e: React.FormEvent) => {
@@ -215,6 +256,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       await addDoc(collection(db, 'suggestions'), {
         title: suggestForm.title.trim(),
         category: suggestForm.category,
+        edition: suggestForm.edition,
         description: suggestForm.description.trim(),
         downloadUrl: suggestForm.downloadUrl.trim(),
         suggestedBy: suggestForm.suggestedBy.trim() || (isRTL ? 'مجهول' : 'Anonymous'),
@@ -228,6 +270,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       setSuggestForm({
         title: '',
         category: 'مودات',
+        edition: 'both',
         description: '',
         downloadUrl: '',
         suggestedBy: userEmail || ''
@@ -236,33 +279,70 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       alert(isRTL ? 'تم تقديم اقتراحك بنجاح! سيتم مراجعته ورفعه بواسطة الإدارة ⚡' : 'Suggestion submitted successfully! The admin will review & publish it.');
     } catch (err) {
       console.error(err);
+      handleFirestoreError(err, OperationType.WRITE, 'suggestions');
       alert(isRTL ? 'حدث خطأ أثناء إرسال الاقتراح.' : 'An error occurred while submitting.');
     } finally {
       setLoadingAction(null);
     }
   };
 
-  // Upvote Suggestion
-  const handleVote = async (id: string, voters: string[]) => {
+  // Upvote/Downvote Suggestion with full toggle support
+  const handleVote = async (id: string, direction: 'up' | 'down', currentVotes: number, upvoters?: string[], downvoters?: string[], voters?: string[]) => {
     const userIdentifier = userEmail || localStorage.getItem('suggestion_vote_user') || Math.random().toString();
     if (!localStorage.getItem('suggestion_vote_user')) {
       localStorage.setItem('suggestion_vote_user', userIdentifier);
     }
 
-    const currentVoters = voters || [];
-    if (currentVoters.includes(userIdentifier)) {
-      alert(isRTL ? 'لقد قمت بالتصويت لهذا المود بالفعل! 👍' : 'You have already voted for this mod! 👍');
-      return;
+    const resolvedUpvoters = upvoters || voters || [];
+    const resolvedDownvoters = downvoters || [];
+
+    let newUpvoters = [...resolvedUpvoters];
+    let newDownvoters = [...resolvedDownvoters];
+    let netChange = 0;
+
+    if (direction === 'up') {
+      if (newUpvoters.includes(userIdentifier)) {
+        // Toggle off upvote
+        newUpvoters = newUpvoters.filter(u => u !== userIdentifier);
+        netChange = -1;
+      } else {
+        // Add upvote
+        newUpvoters.push(userIdentifier);
+        netChange += 1;
+        if (newDownvoters.includes(userIdentifier)) {
+          newDownvoters = newDownvoters.filter(d => d !== userIdentifier);
+          netChange += 1; // negate the previous downvote
+        }
+      }
+    } else {
+      if (newDownvoters.includes(userIdentifier)) {
+        // Toggle off downvote
+        newDownvoters = newDownvoters.filter(d => d !== userIdentifier);
+        netChange = 1;
+      } else {
+        // Add downvote
+        newDownvoters.push(userIdentifier);
+        netChange -= 1;
+        if (newUpvoters.includes(userIdentifier)) {
+          newUpvoters = newUpvoters.filter(u => u !== userIdentifier);
+          netChange -= 1; // negate the previous upvote
+        }
+      }
     }
+
+    const finalVotes = (currentVotes || 0) + netChange;
 
     try {
       const docRef = doc(db, 'suggestions', id);
       await updateDoc(docRef, {
-        votes: currentVoters.length + 1,
-        voters: [...currentVoters, userIdentifier]
+        votes: finalVotes,
+        upvoters: newUpvoters,
+        downvoters: newDownvoters,
+        voters: newUpvoters // Maintain for backward compatibility/other components
       });
     } catch (err) {
-      console.error(err);
+      console.error("Error voting:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `suggestions/${id}`);
     }
   };
 
@@ -275,6 +355,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       await deleteDoc(doc(db, 'suggestions', id));
     } catch (err) {
       console.error(err);
+      handleFirestoreError(err, OperationType.DELETE, `suggestions/${id}`);
     }
   };
 
@@ -287,7 +368,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       description: s.description,
       downloadUrl: s.downloadUrl,
       thumbnail: PRESET_THUMBNAILS[0].url,
-      edition: 'both',
+      edition: s.edition || 'both',
       isPaid: false,
       price: '',
       pointsPrice: 150,
@@ -334,6 +415,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       alert(isRTL ? 'تم رفع المود ونشره بنجاح في سوق ماين كرافت! 🚀🔥' : 'Mod successfully published to the Live Store! 🚀🔥');
     } catch (err) {
       console.error(err);
+      handleFirestoreError(err, OperationType.WRITE, 'games_or_suggestions');
       alert(isRTL ? 'حدث خطأ أثناء نشر المود.' : 'An error occurred during publishing.');
     } finally {
       setLoadingAction(null);
@@ -349,58 +431,124 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
     >
       
       {/* FULL WIDTH HERO BANNER WITH SLIDER */}
-      <div className="relative w-full rounded-[2.5rem] overflow-hidden bg-zinc-950 border border-zinc-900 shadow-2xl min-h-[300px] sm:min-h-[360px] md:min-h-[420px] flex flex-col items-center justify-center p-6 text-center transition-all duration-300">
+      <div className="relative w-full rounded-[2rem] overflow-hidden bg-gradient-to-br from-[#120f0a] via-[#09090b] to-[#040405] border border-zinc-900 shadow-2xl min-h-[280px] sm:min-h-[320px] md:min-h-[360px] flex flex-col items-center justify-center p-6 md:p-8 transition-all duration-300">
         
-        {/* Background Images Layer with Crossfade Transition */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentSlide}
-            initial={{ opacity: 0, scale: 1.05 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.7, ease: "easeInOut" }}
-            className="absolute inset-0 w-full h-full"
-            style={{
-              backgroundImage: `url(${slides[currentSlide].image})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-            }}
-          />
-        </AnimatePresence>
-
-        {/* Semi-transparent dark overlay */}
-        <div className="absolute inset-0 bg-black/60 bg-gradient-to-t from-black/95 via-black/60 to-black/40" />
+        {/* Soft yellow/golden ambient radial glow behind the center */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(245,158,11,0.06)_0%,_transparent_70%)] pointer-events-none" />
+        
+        {/* Symmetrical golden particle or visual highlight lines */}
+        <div className="absolute top-0 inset-x-12 h-[1px] bg-gradient-to-r from-transparent via-amber-500/20 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 inset-x-12 h-[1px] bg-gradient-to-r from-transparent via-amber-500/20 to-transparent pointer-events-none" />
 
         {/* Slide Content Router */}
-        <div className="relative z-10 w-full max-w-3xl mx-auto flex flex-col items-center justify-center py-4">
-          
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentSlide}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.5, ease: "easeOut" }}
-              className="space-y-4 px-4"
-            >
-              <div className="space-y-1">
-                <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)] font-sans">
-                  {isRTL ? slides[currentSlide].titleAr : slides[currentSlide].titleEn}
-                </h1>
-                <h2 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black text-[#f59e0b] tracking-tight drop-shadow-[0_4px_12px_rgba(0,0,0,0.9)] font-sans">
-                  {isRTL ? slides[currentSlide].accentAr : slides[currentSlide].accentEn}
-                </h2>
-              </div>
+        {carouselMods.length > 0 && (
+          <div className="relative z-10 w-full max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 md:gap-10 py-2">
+            
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentSlide}
+                initial={{ opacity: 0, x: isRTL ? 30 : -30 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: isRTL ? -30 : 30 }}
+                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                className="flex-1 flex flex-col justify-center space-y-4 text-right"
+                style={{ direction: isRTL ? 'rtl' : 'ltr' }}
+              >
+                {/* Category & Edition Badges */}
+                <div className="flex flex-wrap items-center gap-2 justify-start">
+                  <span className="px-2.5 py-0.5 text-[9px] font-black tracking-widest uppercase rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-500 shadow-sm shadow-amber-500/5">
+                    {carouselMods[currentSlide].category || (isRTL ? 'مودات' : 'MODS')}
+                  </span>
+                  {carouselMods[currentSlide].edition && (
+                    <span className="px-2.5 py-0.5 text-[9px] font-black tracking-widest uppercase rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400">
+                      {carouselMods[currentSlide].edition === 'both' ? (isRTL ? 'كل الإصدارات' : 'All Editions') : carouselMods[currentSlide].edition.toUpperCase()}
+                    </span>
+                  )}
+                  {carouselMods[currentSlide].rating && (
+                    <span className="px-2 py-0.5 text-[9px] font-bold rounded-md bg-zinc-900 border border-zinc-800 text-amber-400 flex items-center gap-1">
+                      <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
+                      {carouselMods[currentSlide].rating}
+                    </span>
+                  )}
+                </div>
 
-              <p className="text-zinc-200 text-xs sm:text-sm md:text-base font-medium drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] px-4">
-                {isRTL ? slides[currentSlide].subtitleAr : slides[currentSlide].subtitleEn}
-              </p>
-            </motion.div>
-          </AnimatePresence>
+                {/* Mod Title */}
+                <div className="space-y-1">
+                  <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-amber-100 to-amber-500 tracking-tight leading-tight select-none">
+                    {carouselMods[currentSlide].title}
+                  </h1>
+                </div>
 
-          {/* Dots Indicator */}
-          <div className="flex items-center gap-2.5 pt-6">
-            {slides.map((slide, index) => {
+                {/* Mod Description */}
+                <p className="text-zinc-400 text-xs sm:text-sm font-medium leading-relaxed max-w-2xl text-justify hyphens-auto">
+                  {carouselMods[currentSlide].description}
+                </p>
+
+                {/* Info Pills */}
+                <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold text-zinc-500 pt-0.5">
+                  {carouselMods[currentSlide].downloads && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                      {isRTL ? `${carouselMods[currentSlide].downloads} تحميل` : `${carouselMods[currentSlide].downloads} Downloads`}
+                    </span>
+                  )}
+                  {carouselMods[currentSlide].version && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                      {isRTL ? `إصدار ${carouselMods[currentSlide].version}` : `Version ${carouselMods[currentSlide].version}`}
+                    </span>
+                  )}
+                </div>
+
+                {/* Actions / Trigger details modal */}
+                <div className="pt-2 flex items-center gap-3 justify-start">
+                  <button
+                    onClick={() => onSelectGame && onSelectGame(carouselMods[currentSlide])}
+                    className="bg-amber-500 hover:bg-amber-400 text-black px-5 py-2.5 rounded-xl shadow-lg shadow-amber-500/10 font-black text-xs tracking-wider transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                  >
+                    <span>{isRTL ? 'تصفح التفاصيل والتحميل ⚡' : 'View Details & Download ⚡'}</span>
+                  </button>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+
+            {/* Showcase Mod Thumbnail (No big background stretch, but a beautiful 3D frame preview) */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentSlide}
+                initial={{ opacity: 0, scale: 0.9, rotate: isRTL ? -3 : 3 }}
+                animate={{ opacity: 1, scale: 1, rotate: 0 }}
+                exit={{ opacity: 0, scale: 0.9, rotate: isRTL ? 3 : -3 }}
+                transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                className="w-full max-w-[160px] sm:max-w-[200px] md:max-w-[220px] aspect-square relative group/preview cursor-pointer"
+                onClick={() => onSelectGame && onSelectGame(carouselMods[currentSlide])}
+              >
+                {/* 3D layer backshadow */}
+                <div className="absolute inset-0 rounded-[1.5rem] bg-amber-500/5 border border-amber-500/10 scale-105 blur-lg group-hover/preview:bg-amber-500/10 transition-colors duration-500" />
+                
+                {/* Main image container with golden rim */}
+                <div className="absolute inset-0 rounded-[1.5rem] overflow-hidden border border-zinc-800 bg-zinc-950 p-1 shadow-2xl transition-all duration-500 group-hover/preview:border-amber-500/30 group-hover/preview:scale-[1.02]">
+                  <div className="w-full h-full rounded-[1.25rem] overflow-hidden relative">
+                    <img 
+                      src={carouselMods[currentSlide].thumbnail} 
+                      alt={carouselMods[currentSlide].title}
+                      className="w-full h-full object-cover transition-transform duration-700 group-hover/preview:scale-108"
+                      referrerPolicy="no-referrer"
+                    />
+                    {/* Golden glassy overlay gradient on hover */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80 group-hover/preview:opacity-40 transition-opacity duration-300" />
+                  </div>
+                </div>
+              </motion.div>
+            </AnimatePresence>
+
+          </div>
+        )}
+
+        {/* Dots Indicator */}
+        {carouselMods.length > 0 && (
+          <div className="flex items-center gap-2.5 pt-6 relative z-20">
+            {carouselMods.map((slide, index) => {
               const isActive = index === currentSlide;
               return (
                 <button
@@ -411,38 +559,39 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                   }}
                   className={`transition-all duration-300 cursor-pointer ${
                     isActive 
-                      ? 'w-7 h-2.5 rounded-full bg-[#f59e0b] shadow-md shadow-amber-500/30' 
-                      : 'w-2.5 h-2.5 rounded-full bg-zinc-500/50 hover:bg-zinc-400'
+                      ? 'w-7 h-2 rounded-full bg-[#f59e0b] shadow-md shadow-amber-500/30' 
+                      : 'w-2 rounded-full h-2 bg-zinc-700/60 hover:bg-zinc-500'
                   }`}
                   aria-label={`Go to slide ${index + 1}`}
                 />
               );
             })}
           </div>
-
-        </div>
+        )}
 
         {/* Manual navigation controls */}
-        <div className="absolute inset-x-4 sm:inset-x-6 flex items-center justify-between pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
-          <button
-            onClick={isRTL ? handleNext : handlePrev}
-            className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 border border-zinc-800/70 text-white flex items-center justify-center pointer-events-auto transition active:scale-90 cursor-pointer"
-            aria-label="Previous slide"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-              <path strokeLinecap="round" strokeLinejoin="round" d={isRTL ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"} />
-            </svg>
-          </button>
-          <button
-            onClick={isRTL ? handlePrev : handleNext}
-            className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 border border-zinc-800/70 text-white flex items-center justify-center pointer-events-auto transition active:scale-90 cursor-pointer"
-            aria-label="Next slide"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
-              <path strokeLinecap="round" strokeLinejoin="round" d={isRTL ? "M15 19l-7-7 7-7" : "M9 5l7 7-7 7"} />
-            </svg>
-          </button>
-        </div>
+        {carouselMods.length > 1 && (
+          <div className="absolute inset-x-4 sm:inset-x-6 flex items-center justify-between pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-20">
+            <button
+              onClick={isRTL ? handleNext : handlePrev}
+              className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 border border-zinc-800/70 text-white flex items-center justify-center pointer-events-auto transition active:scale-90 cursor-pointer"
+              aria-label="Previous slide"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                <path strokeLinecap="round" strokeLinejoin="round" d={isRTL ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"} />
+              </svg>
+            </button>
+            <button
+              onClick={isRTL ? handlePrev : handleNext}
+              className="w-11 h-11 rounded-full bg-black/50 hover:bg-black/80 border border-zinc-800/70 text-white flex items-center justify-center pointer-events-auto transition active:scale-90 cursor-pointer"
+              aria-label="Next slide"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                <path strokeLinecap="round" strokeLinejoin="round" d={isRTL ? "M15 19l-7-7 7-7" : "M9 5l7 7-7 7"} />
+              </svg>
+            </button>
+          </div>
+        )}
 
       </div>
 
@@ -451,11 +600,11 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
       {/* ======================================= */}
       <AnimatePresence>
         {showSuggestModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 1, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 1, scale: 0.95 }}
               className="bg-zinc-950 border border-zinc-900 rounded-[2rem] w-full max-w-lg overflow-hidden shadow-2xl relative text-right"
               dir={isRTL ? "rtl" : "ltr"}
             >
@@ -487,7 +636,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                     placeholder={isRTL ? 'مثال: Physics Mod Pro أو More Tools' : 'e.g. Physics Mod Pro'}
                     value={suggestForm.title}
                     onChange={(e) => setSuggestForm({ ...suggestForm, title: e.target.value })}
-                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold"
                   />
                 </div>
 
@@ -496,16 +645,50 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                   <label className="text-xs font-black text-zinc-400 block">
                     {isRTL ? 'التصنيف' : 'Category'}
                   </label>
-                  <select
-                    value={suggestForm.category}
-                    onChange={(e) => setSuggestForm({ ...suggestForm, category: e.target.value })}
-                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold cursor-pointer"
-                  >
-                    <option value="مودات">{isRTL ? 'مودات' : 'Mods'}</option>
-                    <option value="خرائط">{isRTL ? 'خرائط' : 'Maps'}</option>
-                    <option value="شيدرز">{isRTL ? 'شيدرز' : 'Shaders'}</option>
-                    <option value="سكنات">{isRTL ? 'سكنات' : 'Skins'}</option>
-                  </select>
+                  <div className="relative">
+                    <select
+                      value={suggestForm.category}
+                      onChange={(e) => setSuggestForm({ ...suggestForm, category: e.target.value })}
+                      className={`w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold cursor-pointer appearance-none ${
+                        isRTL ? 'pr-4 pl-10 text-right' : 'pl-4 pr-10 text-left'
+                      }`}
+                    >
+                      <option value="مودات">{isRTL ? 'مودات' : 'Mods'}</option>
+                      <option value="خرائط">{isRTL ? 'خرائط' : 'Maps'}</option>
+                      <option value="شيدرز">{isRTL ? 'شيدرز' : 'Shaders'}</option>
+                      <option value="سكنات">{isRTL ? 'سكنات' : 'Skins'}</option>
+                    </select>
+                    <div className={`absolute inset-y-0 flex items-center pointer-events-none text-zinc-500 ${
+                      isRTL ? 'left-3' : 'right-3'
+                    }`}>
+                      <ChevronsUpDown className="w-4.5 h-4.5" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Minecraft Edition Selection */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black text-zinc-400 block">
+                    {isRTL ? 'إصدار ماين كرافت المتوافق' : 'Minecraft Edition'}
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={suggestForm.edition}
+                      onChange={(e) => setSuggestForm({ ...suggestForm, edition: e.target.value as any })}
+                      className={`w-full bg-zinc-900 border border-zinc-800 rounded-xl py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold cursor-pointer appearance-none ${
+                        isRTL ? 'pr-4 pl-10 text-right' : 'pl-4 pr-10 text-left'
+                      }`}
+                    >
+                      <option value="both">{isRTL ? 'الكل (الجافا والبدروك)' : 'Both Editions'}</option>
+                      <option value="java">{isRTL ? 'النسخة الجافا (Java Edition)' : 'Java Edition'}</option>
+                      <option value="bedrock">{isRTL ? 'نسخة الجوال والكونسول (Bedrock)' : 'Bedrock Edition'}</option>
+                    </select>
+                    <div className={`absolute inset-y-0 flex items-center pointer-events-none text-zinc-500 ${
+                      isRTL ? 'left-3' : 'right-3'
+                    }`}>
+                      <ChevronsUpDown className="w-4.5 h-4.5" />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Mod Download / Reference URL */}
@@ -519,7 +702,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                     placeholder="https://..."
                     value={suggestForm.downloadUrl}
                     onChange={(e) => setSuggestForm({ ...suggestForm, downloadUrl: e.target.value })}
-                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-mono"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-mono"
                   />
                 </div>
 
@@ -534,7 +717,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                     placeholder={isRTL ? 'اكتب ما يفعله المود، ولماذا ترغب في إضافته للموقع...' : 'Describe what this mod does and why it is great...'}
                     value={suggestForm.description}
                     onChange={(e) => setSuggestForm({ ...suggestForm, description: e.target.value })}
-                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-semibold"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-semibold"
                   />
                 </div>
 
@@ -549,7 +732,7 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                     value={suggestForm.suggestedBy}
                     onChange={(e) => setSuggestForm({ ...suggestForm, suggestedBy: e.target.value })}
                     disabled={!!userEmail}
-                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold disabled:opacity-50"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white focus:outline-none focus:border-amber-500 font-bold disabled:opacity-100"
                   />
                 </div>
 
@@ -647,6 +830,12 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                           <span className="text-[9px] bg-zinc-900 border border-zinc-800 text-zinc-400 px-2 py-0.5 rounded font-black uppercase">
                             {item.category}
                           </span>
+
+                          {item.edition && (
+                            <span className="text-[9px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-2 py-0.5 rounded font-black">
+                              {item.edition === 'both' ? (isRTL ? 'الكل (جافا + بدروك)' : 'Java + Bedrock') : item.edition === 'java' ? (isRTL ? 'جافا (Java)' : 'Java Edition') : (isRTL ? 'جوال وبدروك' : 'Bedrock Edition')}
+                            </span>
+                          )}
                           
                           {item.status === 'approved' && (
                             <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded font-black flex items-center gap-1">
@@ -689,18 +878,41 @@ export const HeroSection: React.FC<HeroSectionProps> = React.memo(({
                       {/* Side Vote/Action Deck */}
                       <div className="flex sm:flex-col items-center justify-between sm:justify-center gap-3 shrink-0 border-t sm:border-t-0 sm:border-r border-zinc-800/60 pt-4 sm:pt-0 sm:pr-4">
                         
-                        {/* Upvote Capsule */}
-                        <button
-                          onClick={() => handleVote(item.id, item.voters)}
-                          className={`flex items-center justify-center gap-2 h-10 px-4 rounded-xl border font-black text-xs transition-all cursor-pointer ${
-                            item.voters?.includes(userEmail || localStorage.getItem('suggestion_vote_user') || 'anonymous')
-                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-500'
-                              : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700'
-                          }`}
-                        >
-                          <ThumbsUp className="w-3.5 h-3.5" />
-                          <span>{item.votes || 0}</span>
-                        </button>
+                        {/* Upvote & Downvote Control Unit */}
+                        <div className="flex flex-col items-center gap-1 bg-zinc-950/80 border border-zinc-900 rounded-2xl p-1.5 select-none min-w-[44px]">
+                          {/* Upvote */}
+                          <button
+                            onClick={() => handleVote(item.id, 'up', item.votes, item.upvoters, item.downvoters, item.voters)}
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                              (item.upvoters || item.voters || []).includes(userEmail || localStorage.getItem('suggestion_vote_user') || 'anonymous')
+                                ? 'bg-green-500/10 border border-green-500/30 text-green-500 shadow-md shadow-green-950/10'
+                                : 'bg-zinc-900/40 border border-zinc-900 text-zinc-500 hover:text-green-500 hover:border-green-500/20'
+                            }`}
+                            title={isRTL ? 'تصويت للأعلى (أعجبني)' : 'Upvote'}
+                          >
+                            <ChevronUp className="w-5 h-5 stroke-[2.5]" />
+                          </button>
+
+                          {/* Net Votes Counter */}
+                          <span className={`text-xs font-extrabold text-center min-w-[24px] font-mono tracking-tighter ${
+                            (item.votes || 0) > 0 ? 'text-green-500' : (item.votes || 0) < 0 ? 'text-red-500' : 'text-zinc-400'
+                          }`}>
+                            {item.votes || 0}
+                          </span>
+
+                          {/* Downvote */}
+                          <button
+                            onClick={() => handleVote(item.id, 'down', item.votes, item.upvoters, item.downvoters, item.voters)}
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                              (item.downvoters || []).includes(userEmail || localStorage.getItem('suggestion_vote_user') || 'anonymous')
+                                ? 'bg-red-500/10 border border-red-500/30 text-red-500 shadow-md shadow-red-950/10'
+                                : 'bg-zinc-900/40 border border-zinc-900 text-zinc-500 hover:text-red-500 hover:border-red-500/20'
+                            }`}
+                            title={isRTL ? 'تصويت للأسفل (لم يعجبني)' : 'Downvote'}
+                          >
+                            <ChevronDown className="w-5 h-5 stroke-[2.5]" />
+                          </button>
+                        </div>
 
                         {/* Admin Approvals & Trash */}
                         {isAdmin && (

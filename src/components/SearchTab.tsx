@@ -133,7 +133,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                   return {
                     gradient: 'from-rose-650 to-red-650',
                     borderClass: 'border-red-900 hover:border-red-600',
-                    badgeBg: 'bg-rose-500/10 text-rose-450 border-red-500/20',
+                    badgeBg: 'bg-rose-950 text-rose-400 border-red-900',
                     btnBg: 'bg-red-650 hover:bg-red-600',
                     activeColor: 'text-rose-400',
                   };
@@ -142,7 +142,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                   return {
                     gradient: 'from-emerald-500 to-teal-600',
                     borderClass: 'border-emerald-900 hover:border-emerald-600',
-                    badgeBg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                    badgeBg: 'bg-emerald-950 text-emerald-400 border-emerald-900',
                     btnBg: 'bg-emerald-600 hover:bg-emerald-500',
                     activeColor: 'text-emerald-400',
                   };
@@ -151,7 +151,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                   return {
                     gradient: 'from-cyan-500 to-sky-650',
                     borderClass: 'border-cyan-900 hover:border-cyan-600',
-                    badgeBg: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+                    badgeBg: 'bg-cyan-950 text-cyan-400 border-cyan-900',
                     btnBg: 'bg-cyan-600 hover:bg-cyan-500',
                     activeColor: 'text-cyan-400',
                   };
@@ -160,7 +160,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                   return {
                     gradient: 'from-amber-500 to-orange-600',
                     borderClass: 'border-amber-900 hover:border-amber-600',
-                    badgeBg: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                    badgeBg: 'bg-amber-950 text-amber-400 border-amber-900',
                     btnBg: 'bg-amber-550 hover:bg-amber-500',
                     activeColor: 'text-amber-400',
                   };
@@ -168,7 +168,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                 return {
                   gradient: 'from-fuchsia-500 via-pink-500 to-violet-500',
                   borderClass: 'border-zinc-900 hover:border-zinc-800',
-                  badgeBg: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
+                  badgeBg: 'bg-fuchsia-950 text-fuchsia-400 border-fuchsia-900',
                   btnBg: 'bg-zinc-800 hover:bg-zinc-750',
                   activeColor: 'text-fuchsia-400',
                 };
@@ -192,7 +192,7 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                       referrerPolicy="no-referrer"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-85" />
-                    <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-xs font-black text-white border border-zinc-800">
+                    <div className="absolute top-4 right-4 bg-black px-3 py-1 rounded-full flex items-center gap-1 text-xs font-black text-white border border-zinc-800">
                       <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
                       {game.rating}
                     </div>
@@ -202,11 +202,11 @@ export const SearchTab: React.FC<SearchTabProps> = React.memo(({
                     <div className="flex items-center justify-between">
                       {game.isPaid ? (
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-amber-500 bg-amber-500/10 border-amber-500/20 flex items-center gap-1">
+                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-amber-500 bg-amber-950 border-amber-900 flex items-center gap-1">
                             <Coins className="w-3.5 h-3.5 inline text-amber-400 animate-pulse" />
                             {game.price || (language === 'ar' ? 'متميز' : 'Premium')}
                           </span>
-                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-emerald-400 bg-emerald-500/10 border-emerald-500/20 flex items-center gap-1">
+                          <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-emerald-400 bg-emerald-950 border-emerald-900 flex items-center gap-1">
                             {language === 'ar' ? 'الشراء عبر النقط' : 'Buy with points'}
                           </span>
                         </div>

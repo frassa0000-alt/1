@@ -152,6 +152,13 @@ service cloud.firestore {
       allow update, delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
     }
 
+    match /suggestions/{suggestionId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if isAdmin();
+    }
+
     match /test/connection {
       allow read: if true;
     }
