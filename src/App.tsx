@@ -42,11 +42,15 @@ import {
   LayoutDashboard,
   Menu,
   MoreHorizontal,
+  MoreVertical,
   Languages,
   Sun,
   Moon,
   Link as LinkIcon,
   Image as ImageIcon,
+  Map,
+  Hammer,
+  Package,
   Users,
   Crown,
   Zap,
@@ -56,7 +60,14 @@ import {
   Twitter,
   Music,
   Coins,
-  DollarSign
+  DollarSign,
+  UploadCloud,
+  Bell,
+  FileText,
+  Video,
+  Layers,
+  Share2,
+  Wrench
 } from 'lucide-react';
 import { 
   auth, 
@@ -87,19 +98,21 @@ import {
   updateDoc,
   serverTimestamp,
   arrayUnion,
-  where
+  where,
+  increment
 } from 'firebase/firestore';
 // @ts-ignore
 import { GoogleGenAI, Type } from '@google/genai';
 // @ts-ignore
 import backgroundImage from './assets/images/gih_bg_golden_1781052220481.png';
 
-// Import Modular Dashboard Components with Lazy Loading for optimized catalog scaling
-const HeroSection = React.lazy(() => import('./components/HeroSection').then(m => ({ default: m.HeroSection })));
-const SidebarSection = React.lazy(() => import('./components/SidebarSection').then(m => ({ default: m.SidebarSection })));
-const SearchTab = React.lazy(() => import('./components/SearchTab').then(m => ({ default: m.SearchTab })));
-const FavoritesTab = React.lazy(() => import('./components/FavoritesTab').then(m => ({ default: m.FavoritesTab })));
-const AdCarousel = React.lazy(() => import('./components/AdCarousel').then(m => ({ default: m.AdCarousel })));
+// Import Modular Dashboard Components statically for robust single-file bundling
+import { HeroSection } from './components/HeroSection';
+import { SidebarSection } from './components/SidebarSection';
+import { SearchTab } from './components/SearchTab';
+import { FavoritesTab } from './components/FavoritesTab';
+import { AdCarousel } from './components/AdCarousel';
+import { GamerArcade } from './components/GamerArcade';
 
 // Types
 interface Game {
@@ -115,6 +128,9 @@ interface Game {
   isPaid?: boolean;
   price?: string;
   pointsPrice?: number;
+  downloads?: string;
+  version?: string;
+  tag?: string;
 }
 
 interface UserProfileData {
@@ -130,6 +146,7 @@ interface UserProfileData {
   points?: number;
   lastPointsClaimedAt?: string | null;
   purchased?: string[];
+  bio?: string;
 }
 
 interface Report {
@@ -149,17 +166,186 @@ interface Ad {
   title?: string;
 }
 
-const PRESET_CAROUSEL_MODS: any[] = [];
+const SEEDED_FALLBACK_GAMES: Game[] = [
+  {
+    id: "chaos-cubed",
+    title: "Chaos Cubed: Cursed Cubes",
+    description: "إضافة مكعبات الفوضى واللعنات الجديدة لماين كرافت",
+    thumbnail: "/src/assets/images/chaos_cubed_1782507861799.jpg",
+    downloadUrl: "https://www.curseforge.com/minecraft/mc-mods/jei",
+    category: "مودات",
+    rating: 4.8,
+    edition: "both",
+    isPaid: false,
+    downloads: "150K",
+    version: "1.20+",
+    tag: "خفيف"
+  },
+  {
+    id: "herschel-backpack",
+    title: "Herschel Backpack Trials",
+    description: "إضافة حزم وحقائب هيرشل للمغامرات والاستكشاف الأسطوري",
+    thumbnail: "/src/assets/images/herschel_backpack_1782507876946.jpg",
+    downloadUrl: "https://www.curseforge.com/minecraft/mc-mods/jei",
+    category: "مودات",
+    rating: 4.9,
+    edition: "both",
+    isPaid: false,
+    downloads: "490K",
+    version: "1.20+",
+    tag: "خفيف"
+  },
+  {
+    id: "actions-and-stuff",
+    title: "Actions & Stuff 1.11",
+    description: "تعديل رائع لإضافة حركات قتالية وأكشن واقعي للاعبين",
+    thumbnail: "/src/assets/images/actions_and_stuff_1782507890452.jpg",
+    downloadUrl: "https://www.curseforge.com/minecraft/mc-mods/jei",
+    category: "شيدرز",
+    rating: 5.0,
+    edition: "both",
+    isPaid: false,
+    downloads: "2.4M",
+    version: "1.20+",
+    tag: "متوسط"
+  },
+  {
+    id: "essentials",
+    title: "Essentials",
+    description: "حزمة أدوات وتروس تكنولوجية أساسية لكل سيرفر وعالم",
+    thumbnail: "/src/assets/images/essentials_addon_1782507905543.jpg",
+    downloadUrl: "https://www.curseforge.com/minecraft/mc-mods/jei",
+    category: "مودات",
+    rating: 4.7,
+    edition: "both",
+    isPaid: false,
+    downloads: "1.8M",
+    version: "1.20+",
+    tag: "خفيف"
+  },
+  {
+    id: "royal-mobs",
+    title: "Royal Mobs",
+    description: "سكنات ومظاهر الموبز والوحوش بالملابس الملكية الذهبية الفاخرة",
+    thumbnail: "/src/assets/images/royal_mobs_1782507919624.jpg",
+    downloadUrl: "https://www.curseforge.com/minecraft/mc-mods/jei",
+    category: "سكنات",
+    rating: 4.6,
+    edition: "both",
+    isPaid: false,
+    downloads: "85K",
+    version: "1.20+",
+    tag: "خفيف"
+  },
+  {
+    id: "jujutsu-anime-hd",
+    title: "Jujutsu Anime HD",
+    description: "سكنات ومظاهر حصرية مستوحاة من شخصيات أنمي جوجوتسو كايسن بجودة فائقة",
+    thumbnail: "/src/assets/images/jujutsu_anime_hd_1782507932416.jpg",
+    downloadUrl: "https://www.curseforge.com/minecraft/mc-mods/jei",
+    category: "سكنات",
+    rating: 4.9,
+    edition: "both",
+    isPaid: false,
+    downloads: "120K",
+    version: "1.20+",
+    tag: "خفيف"
+  }
+];
 
+const PRESET_CAROUSEL_MODS: any[] = [];
 const PRESET_GRID_MODS: any[] = [];
 
 const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
   const [games, setGames] = useState<Game[]>([]);
+  const [selectedGameForDetails, setSelectedGameForDetails] = useState<Game | null>(null);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [newComment, setNewComment] = useState('');
+  const [newRating, setNewRating] = useState(5);
+  const [guestName, setGuestName] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [allReviews, setAllReviews] = useState<any[]>([]);
+
+  // Real-time listener for ALL reviews to compute real average ratings of games dynamically
+  useEffect(() => {
+    const q = query(collection(db, 'reviews'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAllReviews(list);
+    }, (error) => {
+      console.warn("Error subscribing to all reviews:", error);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const gamesWithRealRatings = React.useMemo(() => {
+    return games.map(game => {
+      const gameReviews = allReviews.filter(r => r.gameId === game.id);
+      let realRating = game.rating;
+      if (gameReviews.length > 0) {
+        const sum = gameReviews.reduce((acc, r) => acc + r.rating, 0);
+        realRating = Number((sum / gameReviews.length).toFixed(1));
+      }
+      return {
+        ...game,
+        rating: realRating
+      };
+    });
+  }, [games, allReviews]);
+
+  const [deletedGameIds, setDeletedGameIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('golden_gih_deleted_games');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [loading, setLoading] = useState(true);
+  const [visualProgress, setVisualProgress] = useState(0);
+  const [isVisualLoading, setIsVisualLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isVisualLoading) return;
+
+    const interval = setInterval(() => {
+      setVisualProgress((prev) => {
+        if (prev >= 99) {
+          if (!loading) {
+            clearInterval(interval);
+            setIsVisualLoading(false);
+            return 100;
+          }
+          return 99;
+        }
+        // Random increment for organic realistic feels
+        const incrementVal = Math.floor(Math.random() * 5) + 2;
+        return Math.min(prev + incrementVal, 99);
+      });
+    }, 45);
+
+    return () => clearInterval(interval);
+  }, [loading, isVisualLoading]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('الكل');
+  const changeCategoryAndScroll = (category: string) => {
+    setSelectedCategory(category);
+    setTimeout(() => {
+      const element = document.getElementById('available-mods-anchor');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+  };
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSuggestModal, setShowSuggestModal] = useState(false);
+  const [showListModal, setShowListModal] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [showUserPanel, setShowUserPanel] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
@@ -167,11 +353,14 @@ const AppContent = () => {
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showThreeDotsMenu, setShowThreeDotsMenu] = useState(false);
   const [language, setLanguage] = useState<'ar' | 'en'>('ar');
   const [userProfile, setUserProfile] = useState<UserProfileData | null>(null);
   
   // Drawer Editing states
   const [drawerDisplayName, setDrawerDisplayName] = useState('');
+  const [drawerBio, setDrawerBio] = useState('');
+  const [drawerCustomPhotoUrl, setDrawerCustomPhotoUrl] = useState('');
   const [drawerSelectedEdition, setDrawerSelectedEdition] = useState<'java' | 'bedrock'>('java');
   const [isSavingDrawerProfile, setIsSavingDrawerProfile] = useState(false);
   const [drawerSaveSuccess, setDrawerSaveSuccess] = useState(false);
@@ -179,6 +368,8 @@ const AppContent = () => {
   useEffect(() => {
     if (userProfile) {
       setDrawerDisplayName(userProfile.displayName || '');
+      setDrawerBio(userProfile.bio || '');
+      setDrawerCustomPhotoUrl(userProfile.photoURL || '');
       setDrawerSelectedEdition(userProfile.minecraftEdition || 'java');
     }
   }, [userProfile]);
@@ -273,6 +464,50 @@ const AppContent = () => {
     youtube: '',
     twitter: ''
   });
+
+  const [generalSettings, setGeneralSettings] = useState<{
+    siteName: string;
+    siteDescription: string;
+    siteLogo: string;
+    siteUrl: string;
+    adminEmail: string;
+    timezone: string;
+    siteLanguage: string;
+    maintenanceMode: boolean;
+  }>({
+    siteName: 'جولدن',
+    siteDescription: 'جولدن - محتوى ماين كرافت عربي مميز لأخبار، شروحات، مودات و كل ما يخص عالم ماين كرافت!',
+    siteLogo: '',
+    siteUrl: 'https://golden-mc.com',
+    adminEmail: 'admin@golden-mc.com',
+    timezone: 'القاهرة (UTC+02:00)',
+    siteLanguage: 'العربية',
+    maintenanceMode: false,
+  });
+
+  const [stats, setStats] = useState<{
+    totalDownloads: number;
+    totalUsers: number;
+    totalReviews: number;
+    totalFavorites: number;
+  }>({
+    totalDownloads: 0,
+    totalUsers: 0,
+    totalReviews: 0,
+    totalFavorites: 0,
+  });
+
+  useEffect(() => {
+    if (generalSettings.siteName) {
+      document.title = generalSettings.siteName;
+    }
+  }, [generalSettings.siteName]);
+
+  useEffect(() => {
+    if (!generalSettings.maintenanceMode) {
+      setShowLoginModal(false);
+    }
+  }, [generalSettings.maintenanceMode]);
 
   const calculatePointsPrice = (priceStr: string | undefined): number => {
     if (!priceStr) return 100;
@@ -473,14 +708,78 @@ const AppContent = () => {
 
   useEffect(() => {
     const settingsRef = doc(db, 'settings', 'socials');
-    const unsubscribe = onSnapshot(settingsRef, (snap) => {
+    const unsubscribeSocials = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) {
         setSocials(snap.data() as any);
       }
     }, (err) => {
       console.warn("Error fetching social config: ", err);
     });
-    return () => unsubscribe();
+
+    const generalRef = doc(db, 'settings', 'general');
+    const unsubscribeGeneral = onSnapshot(generalRef, (snap) => {
+      if (snap.exists()) {
+        setGeneralSettings(prev => ({
+          ...prev,
+          ...snap.data()
+        }));
+      }
+    }, (err) => {
+      console.warn("Error fetching general config: ", err);
+    });
+
+    const statsRef = doc(db, 'settings', 'stats');
+    const unsubscribeStats = onSnapshot(statsRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setStats(prev => ({
+          ...prev,
+          totalDownloads: Number(data.totalDownloads || 0),
+        }));
+      } else {
+        setDoc(statsRef, {
+          totalDownloads: 0,
+        }).catch(err => console.warn("Failed initializing stats:", err));
+      }
+    }, (err) => {
+      console.warn("Error fetching stats:", err);
+    });
+
+    // Real-time calculation of total registered users and cumulative favorites from Firestore
+    const unsubscribeUsersStats = onSnapshot(collection(db, 'users'), (snapshot) => {
+      let totalFavs = 0;
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (Array.isArray(data.favorites)) {
+          totalFavs += data.favorites.length;
+        }
+      });
+      setStats(prev => ({
+        ...prev,
+        totalUsers: snapshot.size,
+        totalFavorites: totalFavs
+      }));
+    }, (err) => {
+      console.warn("Error counting users/favorites stats:", err);
+    });
+
+    // Real-time calculation of total reviews/comments from Firestore
+    const unsubscribeReviewsStats = onSnapshot(collection(db, 'reviews'), (snapshot) => {
+      setStats(prev => ({
+        ...prev,
+        totalReviews: snapshot.size
+      }));
+    }, (err) => {
+      console.warn("Error counting reviews stats:", err);
+    });
+
+    return () => {
+      unsubscribeSocials();
+      unsubscribeGeneral();
+      unsubscribeStats();
+      unsubscribeUsersStats();
+      unsubscribeReviewsStats();
+    };
   }, []);
 
   const changeEdition = async (edition: 'java' | 'bedrock') => {
@@ -502,7 +801,7 @@ const AppContent = () => {
   };
   const [colorIndex, setColorIndex] = useState(0);
   const [activeMainTab, setActiveMainTab] = useState<'home' | 'search' | 'favorites' | 'settings'>('home');
-  const [activeSubTab, setActiveSubTab] = useState<'home' | 'for-you'>('home');
+  const [activeSubTab, setActiveSubTab] = useState<'home' | 'arcade' | 'for-you'>('home');
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [activeDownload, setActiveDownload] = useState<{ 
     title: string; 
@@ -555,6 +854,11 @@ const AppContent = () => {
       console.error("Direct download popup block or opening error:", err);
     }
     setActiveDownload({ title, url, size, progress: 0, description, category });
+
+    // Increment global downloads in real stats
+    updateDoc(doc(db, 'settings', 'stats'), {
+      totalDownloads: increment(1)
+    }).catch(e => console.warn("Error incrementing downloads in stats:", e));
   };
 
   // Fast-feedback non-blocking background download state loader
@@ -581,9 +885,10 @@ const AppContent = () => {
     return () => clearInterval(interval);
   }, [activeDownload]);
 
-  // Dynamic presets sourced from the Firestore loaded games array
-  const PRESET_CAROUSEL_MODS = games.slice(0, 3);
-  const PRESET_GRID_MODS = games;
+  // Dynamic presets sourced from the Firestore loaded games array with real ratings
+  const displayedGames = gamesWithRealRatings.filter(g => !deletedGameIds.includes(g.id));
+  const PRESET_CAROUSEL_MODS = displayedGames.slice(0, 3);
+  const PRESET_GRID_MODS = displayedGames;
 
   const activeCarouselIndex = PRESET_CAROUSEL_MODS.length > 0 
     ? Math.min(carouselIndex, PRESET_CAROUSEL_MODS.length - 1) 
@@ -720,6 +1025,7 @@ const AppContent = () => {
               email: currentUser.email || '',
               displayName: currentUser.displayName || '',
               photoURL: currentUser.photoURL || '',
+              bio: '',
               role: currentUser.email === 'frassa0000@gmail.com' ? 'admin' : 'user',
               verified: currentUser.email === 'frassa0000@gmail.com' ? true : false,
               theme: 'dark',
@@ -728,6 +1034,11 @@ const AppContent = () => {
               createdAt: serverTimestamp(),
               lastLogin: serverTimestamp(),
             });
+
+            // Increment global users count in stats
+            await updateDoc(doc(db, 'settings', 'stats'), {
+              totalUsers: increment(1)
+            }).catch(e => console.warn("Error incrementing user count in stats:", e));
           } else {
             // Returning user - Only update volatile fields
             await updateDoc(userRef, {
@@ -760,12 +1071,97 @@ const AppContent = () => {
         id: doc.id,
         ...doc.data()
       })) as Game[];
-      setGames(gamesList);
+      
+      if (gamesList.length === 0) {
+        setGames(SEEDED_FALLBACK_GAMES);
+      } else {
+        const combined = [...gamesList];
+        SEEDED_FALLBACK_GAMES.forEach(seeded => {
+          if (!combined.some(g => g.id === seeded.id || g.title.toLowerCase() === seeded.title.toLowerCase())) {
+            combined.push(seeded);
+          }
+        });
+        setGames(combined);
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'games');
     });
     return () => unsubscribe();
   }, [loading, user]);
+
+  // Reviews listener subscription for the active game details drawer
+  useEffect(() => {
+    if (!selectedGameForDetails) {
+      setReviews([]);
+      setNewComment('');
+      setNewRating(5);
+      return;
+    }
+    setReviewsLoading(true);
+    const q = query(
+      collection(db, 'reviews'),
+      where('gameId', '==', selectedGameForDetails.id)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      // Sort newest first
+      list.sort((a: any, b: any) => {
+        const tA = a.createdAt?.seconds ? a.createdAt.seconds * 1000 : (new Date(a.createdAt).getTime() || 0);
+        const tB = b.createdAt?.seconds ? b.createdAt.seconds * 1000 : (new Date(b.createdAt).getTime() || 0);
+        return tB - tA;
+      });
+      setReviews(list);
+      setReviewsLoading(false);
+    }, (error) => {
+      console.error("Error subscribing to reviews:", error);
+      setReviewsLoading(false);
+    });
+    return () => unsubscribe();
+  }, [selectedGameForDetails]);
+
+  const handlePostReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGameForDetails) return;
+    if (!newComment.trim()) {
+      alert(language === 'ar' ? 'الرجاء كتابة تعليق أولاً!' : 'Please write a comment first!');
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    try {
+      const reviewerName = userProfile?.displayName?.trim() || guestName.trim() || (language === 'ar' ? 'لاعب زائر' : 'Guest Player');
+      const reviewerUid = userProfile?.uid || ('guest_' + Math.random().toString(36).substr(2, 9));
+      const reviewerPhoto = userProfile?.photoURL || '';
+
+      const reviewData = {
+        gameId: selectedGameForDetails.id,
+        userId: reviewerUid,
+        userName: reviewerName,
+        userPhoto: reviewerPhoto,
+        rating: Number(newRating),
+        comment: newComment.trim(),
+        createdAt: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, 'reviews'), reviewData);
+      
+      // Increment global reviews count in stats
+      await updateDoc(doc(db, 'settings', 'stats'), {
+        totalReviews: increment(1)
+      }).catch(e => console.warn("Error incrementing reviews count in stats:", e));
+
+      setNewComment('');
+      setGuestName('');
+    } catch (error) {
+      console.error("Error adding review:", error);
+      alert(language === 'ar' ? 'حدث خطأ أثناء إضافة التقييم. الرجاء المحاولة مرة أخرى.' : 'Error submitting review. Please try again.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   const handleGoogleLogin = async () => {
     setAuthLoading(true);
@@ -873,9 +1269,30 @@ const AppContent = () => {
     return 1735689600000 + Math.abs(hash % 31536000000);
   };
 
-  const filteredGames = games.filter(game => {
+  const filteredGames = displayedGames.filter(game => {
     const matchesSearch = game.title.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = selectedCategory === 'الكل' || game.category === selectedCategory;
+    const matchesCategory = (() => {
+      if (selectedCategory === 'الكل' || selectedCategory === 'All') return true;
+      const cat = (game.category || '').toLowerCase();
+      const sel = selectedCategory.toLowerCase();
+      
+      if (sel === 'سكنات' || sel === 'skins') {
+        return cat === 'سكنات' || cat === 'skins';
+      }
+      if (sel === 'مودات' || sel === 'mods' || sel === 'add-ons' || sel === 'addons') {
+        return cat === 'مودات' || cat === 'mods' || cat === 'add-ons' || cat === 'addons';
+      }
+      if (sel === 'خرائط' || sel === 'maps') {
+        return cat === 'خرائط' || cat === 'maps';
+      }
+      if (sel === 'شيدرز' || sel === 'shaders' || sel === 'textures') {
+        return cat === 'شيدرز' || cat === 'shaders' || cat === 'textures';
+      }
+      if (sel === 'موارد' || sel === 'resources' || sel === 'أدوات' || sel === 'tools') {
+        return cat === 'موارد' || cat === 'resources' || cat === 'أدوات' || cat === 'tools';
+      }
+      return cat === sel;
+    })();
     const matchesEdition = !game.edition || game.edition === 'both' || game.edition === selectedEdition;
     return matchesSearch && matchesCategory && matchesEdition;
   });
@@ -900,6 +1317,17 @@ const AppContent = () => {
   }, [searchTerm, selectedCategory, sortBy]);
 
   const isAdmin = user?.email === 'frassa0000@gmail.com';
+  
+  const latestModsList = [...gamesWithRealRatings]
+    .filter(g => g.category === 'مودات' || g.category?.toLowerCase() === 'mods' || g.category?.toLowerCase() === 'addons')
+    .sort((a, b) => getGameCreationTime(b) - getGameCreationTime(a));
+
+  const mostDownloadedList = [...gamesWithRealRatings]
+    .sort((a, b) => getGameDownloads(b) - getGameDownloads(a));
+
+  const latestSkinsList = [...gamesWithRealRatings]
+    .filter(g => g.category === 'سكنات' || g.category?.toLowerCase() === 'skins')
+    .sort((a, b) => getGameCreationTime(b) - getGameCreationTime(a));
   
   const translations = {
     ar: {
@@ -959,12 +1387,18 @@ const AppContent = () => {
       setShowLoginModal(true);
       return;
     }
-    const newFavorites = (userProfile.favorites || []).includes(gameId)
-      ? userProfile.favorites.filter(id => id !== gameId)
-      : [...(userProfile.favorites || []), gameId];
+    const isAdding = !(userProfile.favorites || []).includes(gameId);
+    const newFavorites = isAdding
+      ? [...(userProfile.favorites || []), gameId]
+      : userProfile.favorites.filter(id => id !== gameId);
     
     try {
       await updateDoc(doc(db, 'users', user.uid), { favorites: newFavorites });
+      
+      // Update global favorites count in stats
+      await updateDoc(doc(db, 'settings', 'stats'), {
+        totalFavorites: increment(isAdding ? 1 : -1)
+      }).catch(e => console.warn("Error updating favorites count in stats:", e));
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `users/${user.uid}`);
     }
@@ -1034,6 +1468,17 @@ const AppContent = () => {
 
   const handleDeleteGame = async (gameId: string) => {
     if (!isAdmin) return;
+    // Optimistic fast deletion update state and localstorage
+    setDeletedGameIds(prev => {
+      const updated = [...prev, gameId];
+      try {
+        localStorage.setItem('golden_gih_deleted_games', JSON.stringify(updated));
+      } catch (e) {
+        console.error(e);
+      }
+      return updated;
+    });
+
     try {
       await deleteDoc(doc(db, 'games', gameId));
     } catch (error) {
@@ -1062,20 +1507,333 @@ const AppContent = () => {
     }
   };
 
-  if (loading) {
+  if (isVisualLoading) {
+    const getBilingualLoadingMessage = () => {
+      if (visualProgress < 25) {
+        return {
+          ar: "جاري تأمين الاتصال وحماية البيانات الفائقة...",
+          en: "Securing connection & establishing cloud armor..."
+        };
+      } else if (visualProgress < 50) {
+        return {
+          ar: "فحص ومطابقة ملفات المودات وتوافق الهياكل...",
+          en: "Checking mod file structures & ensuring zero payloads..."
+        };
+      } else if (visualProgress < 75) {
+        return {
+          ar: "مزامنة محفظة النقاط السحابية والجوائز المتاحة...",
+          en: "Synchronizing cloud points wallet & available loot..."
+        };
+      } else if (visualProgress < 95) {
+        return {
+          ar: "ضبط أداء المحرك والاتصال بخوادم غولدين جي...",
+          en: "Tuning graphics engine & linking high-speed Gih servers..."
+        };
+      } else {
+        return {
+          ar: "أهلاً بك في منصة Golden Gih! استعد للمغامرة...",
+          en: "Welcome to Golden Gih platform! Prepare to start..."
+        };
+      }
+    };
+
+    const activeMsg = getBilingualLoadingMessage();
+    const angleInRad = ((visualProgress / 100) * 360 - 90) * (Math.PI / 180);
+    const headX = 100 + 64 * Math.cos(angleInRad);
+    const headY = 100 + 64 * Math.sin(angleInRad);
+
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <motion.div 
-          animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          className="w-12 h-12 border-4 border-red-600 border-t-transparent rounded-full"
-        />
+      <div className="min-h-screen bg-[#030304] flex flex-col items-center justify-center relative overflow-hidden select-none">
+        {/* Radial dark atmospheric background vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_#0a0805_0%,_#020203_100%)] pointer-events-none" />
+        
+        {/* Soft glowing ambient orbs */}
+        <div className="absolute w-[240px] h-[240px] bg-amber-500/[0.03] rounded-full blur-[80px] pointer-events-none" />
+        
+        <motion.div
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="flex flex-col items-center justify-center text-center max-w-[240px] w-full"
+        >
+          {/* Main Gih Loading Ring Container */}
+          <div className="relative w-48 h-48 flex items-center justify-center">
+            <svg viewBox="0 0 200 200" className="w-full h-full drop-shadow-[0_0_20px_rgba(245,158,11,0.15)]">
+              <defs>
+                {/* Luminous Golden Metallic Text Gradient */}
+                <linearGradient id="gold-text-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ffea88" />
+                  <stop offset="25%" stopColor="#f59e0b" />
+                  <stop offset="50%" stopColor="#fffae0" />
+                  <stop offset="75%" stopColor="#d97706" />
+                  <stop offset="100%" stopColor="#78350f" />
+                </linearGradient>
+
+                {/* Glowing Neon Arc Gradient */}
+                <linearGradient id="active-gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#d97706" />
+                  <stop offset="60%" stopColor="#fbbf24" />
+                  <stop offset="100%" stopColor="#fffbeb" />
+                </linearGradient>
+
+                {/* Intense Bloom Filter */}
+                <filter id="gold-glow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="3.5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              {/* Base Track Ring */}
+              <circle 
+                cx="100" 
+                cy="100" 
+                r="64" 
+                fill="none" 
+                stroke="#13110e" 
+                strokeWidth="5" 
+              />
+              <circle 
+                cx="100" 
+                cy="100" 
+                r="64" 
+                fill="none" 
+                stroke="rgba(245,158,11,0.04)" 
+                strokeWidth="8" 
+              />
+
+              {/* Glowing Active Arc */}
+              <motion.circle
+                cx="100"
+                cy="100"
+                r="64"
+                fill="none"
+                stroke="url(#active-gold-grad)"
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeDasharray={2 * Math.PI * 64}
+                animate={{ strokeDashoffset: (2 * Math.PI * 64) - (visualProgress / 100) * (2 * Math.PI * 64) }}
+                transition={{ ease: "easeOut", duration: 0.1 }}
+                filter="url(#gold-glow)"
+              />
+
+              {/* Floating digital pixels/particles around the perimeter */}
+              <rect x="42" y="38" width="2" height="2" fill="#f59e0b" opacity="0.3" />
+              <rect x="154" y="60" width="3" height="3" fill="#f59e0b" opacity="0.4" />
+              <rect x="162" y="94" width="2" height="2" fill="#f59e0b" opacity="0.5" />
+              <rect x="34" y="116" width="3" height="3" fill="#fbbf24" opacity="0.25" />
+              <rect x="148" y="136" width="2" height="2" fill="#f59e0b" opacity="0.4" />
+              <rect x="76" y="158" width="2.5" height="2.5" fill="#fbbf24" opacity="0.3" />
+
+              {/* Sparkling Emitter Tip Particles */}
+              {visualProgress > 0 && visualProgress < 100 && (
+                <>
+                  <motion.rect
+                    x={headX - 1.5}
+                    y={headY - 1.5}
+                    width="3"
+                    height="3"
+                    fill="#ffe066"
+                    filter="url(#gold-glow)"
+                    animate={{ 
+                      x: headX - 1.5 + Math.sin(visualProgress * 0.5) * 5, 
+                      y: headY - 1.5 + Math.cos(visualProgress * 0.5) * 5,
+                      opacity: [1, 0.7, 0],
+                      scale: [1, 1.2, 0]
+                    }}
+                    transition={{ repeat: Infinity, duration: 0.6 }}
+                  />
+                  <motion.rect
+                    x={headX - 1}
+                    y={headY - 1}
+                    width="2.5"
+                    height="2.5"
+                    fill="#f59e0b"
+                    animate={{ 
+                      x: headX - 1 + Math.cos(visualProgress * 0.7) * 7, 
+                      y: headY - 1 + Math.sin(visualProgress * 0.7) * 7,
+                      opacity: [1, 0.5, 0],
+                      scale: [1, 0.8, 0]
+                    }}
+                    transition={{ repeat: Infinity, duration: 0.8 }}
+                  />
+                </>
+              )}
+
+              {/* Centered Pixel Gih Logo group */}
+              <g transform="translate(64, 84)">
+                {/* 3D shadow extrusion underneath */}
+                <g transform="translate(1.5, 2)" opacity="0.95">
+                  {/* G Shadow */}
+                  <path d="M 2,2 h 28 v 8 h -20 v 14 h 14 v -4 h -6 v -4 h 12 v 14 h -28 Z" fill="#3b2707" />
+                  {/* i Shadow */}
+                  <path d="M 36,14 h 8 v 16 h -8 Z M 36,2 h 8 v 8 h -8 Z" fill="#3b2707" />
+                  {/* h Shadow */}
+                  <path d="M 48,2 h 8 v 28 h -8 Z M 56,14 h 16 v 8 h -16 Z M 64,20 h 8 v 10 h -8 Z" fill="#3b2707" />
+                </g>
+
+                {/* Front Golden Letters */}
+                <g>
+                  {/* G Front */}
+                  <path d="M 2,2 h 28 v 8 h -20 v 14 h 14 v -4 h -6 v -4 h 12 v 14 h -28 Z" fill="url(#gold-text-grad)" />
+                  
+                  {/* Creeper Hollow cavity details inside G */}
+                  <rect x="10" y="10" width="14" height="10" fill="#130e05" />
+                  <rect x="12" y="11" width="10" height="8" fill="url(#gold-text-grad)" />
+                  <rect x="13" y="12" width="2" height="2" fill="#110d05" />
+                  <rect x="17" y="12" width="2" height="2" fill="#110d05" />
+                  <rect x="15" y="14" width="2" height="3" fill="#110d05" />
+                  <rect x="14" y="15" width="4" height="2" fill="#110d05" />
+
+                  {/* i Front */}
+                  <path d="M 36,14 h 8 v 16 h -8 Z M 36,2 h 8 v 8 h -8 Z" fill="url(#gold-text-grad)" />
+
+                  {/* h Front */}
+                  <path d="M 48,2 h 8 v 28 h -8 Z M 56,14 h 16 v 8 h -16 Z M 64,20 h 8 v 10 h -8 Z" fill="url(#gold-text-grad)" />
+                </g>
+              </g>
+            </svg>
+
+            {/* Float percentage directly in center, or let Gih stand alone. In the image, percentage is not shown, let's keep Gih absolute clean and elegant! */}
+          </div>
+
+          {/* Symmetrical LOADING Text Block with Square Accents */}
+          <div className="flex items-center justify-center gap-2.5 w-full mt-4 select-none">
+            <div className="h-[1.5px] w-8 bg-gradient-to-r from-transparent to-amber-500/40" />
+            <div className="w-1.5 h-1.5 bg-amber-500/80 rotate-45 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
+            
+            <span className="font-mono text-[9px] font-black tracking-[0.3em] text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-100 uppercase pl-0.5">
+              LOADING
+            </span>
+            
+            <div className="w-1.5 h-1.5 bg-amber-500/80 rotate-45 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
+            <div className="h-[1.5px] w-8 bg-gradient-to-l from-transparent to-amber-500/40" />
+          </div>
+
+          {/* Beautiful Minecraft 3D Grass Block with Symmetrical Lines */}
+          <div className="flex items-center justify-center gap-3 w-full mt-6 select-none">
+            <div className="h-[1px] w-12 bg-gradient-to-r from-transparent via-amber-500/10 to-amber-500/25" />
+            <div className="w-1 h-1 bg-amber-500/30 rotate-45" />
+
+            {/* Isometric Grass Block */}
+            <div className="w-9 h-9 drop-shadow-[0_4px_10px_rgba(0,0,0,0.6)]">
+              <svg viewBox="0 0 64 64" className="w-full h-full">
+                {/* Top Face - Grass */}
+                <polygon 
+                  points="32,12 54,23 32,34 10,23" 
+                  fill="#5c8e32" 
+                  stroke="#6b9e3b" 
+                  strokeWidth="0.5"
+                />
+                {/* Left Face - Dirt */}
+                <polygon 
+                  points="10,23 32,34 32,54 10,43" 
+                  fill="#573d26" 
+                />
+                {/* Right Face - Dirt (shaded) */}
+                <polygon 
+                  points="32,34 54,23 54,43 32,54" 
+                  fill="#44301e" 
+                />
+                {/* Left Grass overhang (jagged blocky style) */}
+                <polygon 
+                  points="10,23 32,34 32,40 28,38 26,41 21,38 18,35 14,38 10,34" 
+                  fill="#5c8e32" 
+                />
+                {/* Right Grass overhang */}
+                <polygon 
+                  points="32,34 54,23 54,34 50,37 47,34 43,38 39,35 32,39" 
+                  fill="#4e792a" 
+                />
+              </svg>
+            </div>
+
+            <div className="w-1 h-1 bg-amber-500/30 rotate-45" />
+            <div className="h-[1px] w-12 bg-gradient-to-l from-transparent via-amber-500/10 to-amber-500/25" />
+          </div>
+
+          {/* Super clean progress status message with no emojis */}
+          <div className="min-h-[32px] flex flex-col justify-center w-full mt-4 select-none px-1">
+            <p className="text-[10px] font-bold text-zinc-500 tracking-wide">
+              {language === 'ar' ? activeMsg.ar : activeMsg.en}
+            </p>
+          </div>
+        </motion.div>
       </div>
     );
   }
 
   return (
     <div dir={language === 'ar' ? 'rtl' : 'ltr'} className={`min-h-screen transition-colors duration-500 ${localTheme === 'light' ? 'bg-white text-zinc-900' : 'bg-black text-white'} font-sans selection:bg-red-500 selection:text-white overflow-x-hidden`}>
+      {generalSettings.maintenanceMode && !isAdmin && (
+        <div className="fixed inset-0 z-[99] bg-black flex flex-col items-center justify-center p-6 text-center select-none overflow-hidden">
+          {/* Dynamic Glow background */}
+          <div className="absolute inset-0 z-0 opacity-10 bg-[radial-gradient(circle_at_center,_#ef4444_0%,_transparent_60%)]" />
+          
+          <div className="relative z-10 max-w-lg bg-zinc-950 border border-zinc-900 rounded-[32px] p-8 md:p-12 shadow-2xl">
+            {generalSettings.siteLogo ? (
+              <img 
+                src={generalSettings.siteLogo} 
+                alt={generalSettings.siteName} 
+                className="w-20 h-20 mx-auto object-contain rounded-2xl mb-8 animate-bounce animate-duration-1000"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-8 animate-pulse">
+                <span className="text-3xl">🛠️</span>
+              </div>
+            )}
+
+            <h1 className="text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-yellow-400 to-amber-600 mb-4 tracking-tight">
+              {generalSettings.siteName || 'جولدن'}
+            </h1>
+
+            <p className="text-base text-zinc-300 font-extrabold mb-6 leading-relaxed">
+              {language === 'ar' 
+                ? 'الموقع حالياً تحت أعمال التحديث والصيانة الدورية لتوفير تجربة أفضل.' 
+                : 'The site is currently undergoing scheduled maintenance and updates.'}
+            </p>
+
+            <p className="text-xs text-zinc-500 leading-relaxed font-semibold mb-8">
+              {language === 'ar' 
+                ? 'يرجى العودة لاحقاً. شكراً لاهتمامكم وصبركم!' 
+                : 'Please check back later. Thank you for your patience!'}
+            </p>
+
+            {!user ? (
+              <button 
+                onClick={() => setShowLoginModal(true)}
+                className="text-xs bg-red-650 hover:bg-red-540 text-white px-8 py-3 rounded-full shadow-lg font-black tracking-wide transition-all cursor-pointer active:scale-95"
+              >
+                {language === 'ar' ? 'تسجيل الدخول كـ مشرف / مدير' : 'Login as Support / Admin'}
+              </button>
+            ) : (
+              <div className="flex flex-col items-center gap-4">
+                <div className="text-xs text-zinc-450 font-bold">
+                  {language === 'ar' ? `مسجل الدخول كـ: ${user.email} (ليس لديك صلاحيات مشرف)` : `Logged in as: ${user.email} (No admin rights)`}
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    className="text-xs bg-red-650 hover:bg-red-540 text-white px-6 py-2.5 rounded-full font-black tracking-wide transition-all cursor-pointer active:scale-95"
+                  >
+                    {language === 'ar' ? 'تسجيل الدخول بحساب آخر' : 'Login with another account'}
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="text-xs bg-zinc-900 hover:bg-zinc-800 text-zinc-300 px-6 py-2.5 rounded-full font-bold transition-all cursor-pointer active:scale-95 border border-zinc-800"
+                  >
+                    {language === 'ar' ? 'تسجيل الخروج' : 'Log Out'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Background Image Layer */}
       <motion.div 
         className="fixed inset-0 pointer-events-none z-0 bg-cover bg-center bg-no-repeat transition-opacity duration-1000"
@@ -1106,12 +1864,139 @@ const AppContent = () => {
       )}
 
       {/* Navigation */}
-      <nav className="fixed top-0 w-full z-50 bg-black/90 border-zinc-900 border-b px-4 md:px-8 py-3.5 flex items-center justify-between">
+      <nav className="fixed top-0 w-full z-50 bg-black/90 border-zinc-900 border-b px-4 md:px-8 py-3.5 flex items-center justify-between" dir="rtl">
         
-        {/* Right Side: Burger Menu avatar card & Golden Gih Mods branding text */}
-        <div className="flex items-center gap-3">
-          {/* Minecraft / Profile Avatar brand marker block */}
-          <div 
+        {/* Left Side: Logo with Custom 3D isometric Gold Cube or uploaded logo */}
+        <div 
+          onClick={() => {
+            setActiveMainTab('home');
+            setActiveSubTab('home');
+            setSelectedCategory('الكل');
+          }}
+          className="flex items-center gap-3 cursor-pointer select-none"
+        >
+          {generalSettings.siteLogo ? (
+            <img 
+              src={generalSettings.siteLogo} 
+              alt={generalSettings.siteName || 'Logo'} 
+              className="w-9 h-9 object-contain rounded-xl hover:scale-105 transition-transform"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <svg className="w-8 h-8 shrink-0 hover:scale-105 transition-transform" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M50 15 L85 32 L50 49 L15 32 Z" fill="url(#topGrad)" stroke="#111" strokeWidth="2.5" strokeLinejoin="round"/>
+              <path d="M15 32 L50 49 L50 82 L15 65 Z" fill="url(#leftGrad)" stroke="#111" strokeWidth="2.5" strokeLinejoin="round"/>
+              <path d="M50 49 L85 32 L85 65 L50 82 Z" fill="url(#rightGrad)" stroke="#111" strokeWidth="2.5" strokeLinejoin="round"/>
+              <path d="M30 40 L50 50" stroke="#f59e0b" strokeWidth="2" strokeOpacity="0.4" />
+              <path d="M70 40 L50 50" stroke="#fbbf24" strokeWidth="2" strokeOpacity="0.4" />
+              <path d="M50 50 L50 70" stroke="#d97706" strokeWidth="2" strokeOpacity="0.4" />
+              <defs>
+                <linearGradient id="topGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#fef08a" />
+                  <stop offset="100%" stopColor="#f59e0b" />
+                </linearGradient>
+                <linearGradient id="leftGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#b45309" />
+                  <stop offset="100%" stopColor="#78350f" />
+                </linearGradient>
+                <linearGradient id="rightGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#d97706" />
+                  <stop offset="100%" stopColor="#92400e" />
+                </linearGradient>
+              </defs>
+            </svg>
+          )}
+          <span className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-250 to-amber-500 font-sans tracking-tight">
+            {generalSettings.siteName || 'Golden'}
+          </span>
+        </div>
+
+        {/* Center: Main tabs/selections */}
+        <div className="hidden lg:flex items-center gap-8 text-sm font-extrabold text-zinc-400">
+          <button 
+            onClick={() => {
+              setActiveMainTab('home');
+              setActiveSubTab('home');
+              changeCategoryAndScroll('الكل');
+            }}
+            className={`transition duration-150 relative py-1.5 cursor-pointer ${
+              activeMainTab === 'home' && activeSubTab === 'home' && selectedCategory === 'الكل'
+                ? 'text-amber-500 font-extrabold border-b-2 border-amber-500'
+                : 'hover:text-white'
+            }`}
+          >
+            {language === 'ar' ? 'الرئيسية' : 'Home'}
+          </button>
+          <button 
+            onClick={() => {
+              setActiveMainTab('home');
+              setActiveSubTab('home');
+              changeCategoryAndScroll(language === 'ar' ? 'مودات' : 'Mods');
+            }}
+            className={`transition duration-150 relative py-1.5 cursor-pointer ${
+              activeMainTab === 'home' && activeSubTab === 'home' && (selectedCategory === 'مودات' || selectedCategory === 'Mods')
+                ? 'text-amber-500 font-extrabold border-b-2 border-amber-500'
+                : 'hover:text-white'
+            }`}
+          >
+            {language === 'ar' ? 'المودات' : 'Mods'}
+          </button>
+          <button 
+            onClick={() => {
+              setActiveMainTab('home');
+              setActiveSubTab('home');
+              changeCategoryAndScroll(language === 'ar' ? 'موارد' : 'Resources');
+            }}
+            className={`transition duration-150 relative py-1.5 cursor-pointer ${
+              activeMainTab === 'home' && activeSubTab === 'home' && (selectedCategory === 'موارد' || selectedCategory === 'Resources')
+                ? 'text-amber-500 font-extrabold border-b-2 border-amber-500'
+                : 'hover:text-white'
+            }`}
+          >
+            {language === 'ar' ? 'الأدوات' : 'Tools'}
+          </button>
+          <button 
+            onClick={() => {
+              setActiveMainTab('home');
+              setActiveSubTab('home');
+              changeCategoryAndScroll(language === 'ar' ? 'خرائط' : 'Maps');
+            }}
+            className={`transition duration-150 relative py-1.5 cursor-pointer ${
+              activeMainTab === 'home' && activeSubTab === 'home' && (selectedCategory === 'خرائط' || selectedCategory === 'Maps')
+                ? 'text-amber-500 font-extrabold border-b-2 border-amber-500'
+                : 'hover:text-white'
+            }`}
+          >
+            {language === 'ar' ? 'الخرائط' : 'Maps'}
+          </button>
+          <button 
+            onClick={() => {
+              setActiveMainTab('home');
+              setActiveSubTab('home');
+              changeCategoryAndScroll(language === 'ar' ? 'سكنات' : 'Skins');
+            }}
+            className={`transition duration-150 relative py-1.5 cursor-pointer ${
+              activeMainTab === 'home' && activeSubTab === 'home' && (selectedCategory === 'سكنات' || selectedCategory === 'Skins')
+                ? 'text-amber-500 font-extrabold border-b-2 border-amber-500'
+                : 'hover:text-white'
+            }`}
+          >
+            {language === 'ar' ? 'السكنات' : 'Skins'}
+          </button>
+          <button 
+            onClick={() => {
+              setActiveMainTab('home');
+              setActiveSubTab('arcade');
+            }}
+            className={`transition duration-150 relative py-1.5 cursor-pointer ${
+              activeMainTab === 'home' && activeSubTab === 'arcade'
+                ? 'text-amber-500 font-extrabold border-b-2 border-amber-500 bg-amber-500/5 px-3 py-1 rounded-full'
+                : 'hover:text-white text-amber-500 font-extrabold animate-pulse'
+            }`}
+          >
+            {language === 'ar' ? 'السيرفرات 🕹️' : 'Servers 🕹️'}
+          </button>
+          <button 
             onClick={() => {
               if (user) {
                 setShowUserPanel(true);
@@ -1120,85 +2005,304 @@ const AppContent = () => {
                 setShowLoginModal(true);
               }
             }}
-            className="cursor-pointer transition-transform active:scale-95 flex items-center shrink-0 select-none"
+            className="hover:text-white transition duration-150 relative py-1.5 cursor-pointer"
           >
-            <div className="w-10 h-10 rounded-xl bg-[#1d0d33] border-2 border-yellow-500/85 p-0.5 overflow-hidden shadow-lg shadow-purple-950/40">
-              <img 
-                src={user?.photoURL && user.photoURL !== "" ? user.photoURL : "https://mc-heads.net/avatar/MHF_Steve/64"} 
-                alt="Avatar" 
-                className="w-full h-full object-cover rounded-lg"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-col text-right leading-[1.1] select-none">
-            <span className="text-sm font-black text-amber-400 tracking-tight">Golden Gih</span>
-            <span className="text-[10px] font-bold text-purple-400">Mods</span>
-          </div>
-        </div>
-
-        {/* Center: Main tabs/selections (Hidden on small mobile screens to prevent clutter, showing on medium+) */}
-        <div className="hidden md:flex bg-zinc-900/80 p-1 rounded-full border border-zinc-800/60 backdrop-blur-md">
-          <button 
-            onClick={() => {
-              setActiveMainTab('home');
-              setActiveSubTab('home');
-            }}
-            className={`px-5 py-1.5 rounded-full text-xs font-black transition-all ${
-              activeMainTab === 'home' && activeSubTab === 'home' 
-                ? 'bg-red-600 text-white shadow-md shadow-red-600/20' 
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            {language === 'ar' ? 'الرئيسية' : 'Home'}
-          </button>
-          <button 
-            onClick={() => {
-              setActiveMainTab('home');
-              setActiveSubTab('for-you');
-            }}
-            className={`px-5 py-1.5 rounded-full text-xs font-black transition-all ${
-              activeMainTab === 'home' && activeSubTab === 'for-you' 
-                ? 'bg-red-600 text-white shadow-md shadow-red-600/20' 
-                : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            {language === 'ar' ? 'لك' : 'For You'}
+            {language === 'ar' ? 'الدعم' : 'Support'}
           </button>
         </div>
 
         {/* Left Side: Actions and Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {/* Profile Picture / User Profile Button */}
+          <button
+            onClick={() => {
+              if (user) {
+                setShowUserPanel(true);
+              } else {
+                setLoginMode('email-signin');
+                setShowLoginModal(true);
+              }
+            }}
+            className="w-9 h-9 rounded-xl overflow-hidden border border-zinc-800/80 hover:border-amber-500 hover:shadow-lg hover:shadow-amber-500/10 transition-all cursor-pointer relative group flex items-center justify-center bg-zinc-950"
+            title={language === 'ar' ? 'حسابك الشخصي' : 'Your Profile'}
+          >
+            <img 
+              src={user ? (userProfile?.photoURL || "https://mc-heads.net/avatar/MHF_Steve/64") : "https://mc-heads.net/avatar/MHF_Steve/64"} 
+              alt="Profile" 
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+              referrerPolicy="no-referrer"
+            />
+            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border border-[#060608] rounded-full shadow-sm shadow-black" />
+          </button>
+
           {/* Points Counter Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-full text-xs font-black select-none shadow-md shadow-amber-950/10 mr-1 ml-1">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl text-xs font-black select-none shadow-md shadow-amber-950/10 mr-1 ml-1">
             <Coins className="w-3.5 h-3.5 text-amber-500" />
             <span>
               {totalPoints} {language === 'ar' ? 'نقطة' : 'Pts'}
             </span>
           </div>
 
-          {/* 1. Language Toggle */}
-          <button 
-            onClick={() => setLanguage(language === 'ar' ? 'en' : 'ar')}
-            className="text-xs font-bold text-zinc-400 hover:text-white transition-all p-2 flex items-center gap-1 shrink-0 select-none"
-          >
-            <span>{language === 'ar' ? 'EN' : 'AR'}</span>
-            <Languages className="w-3.5 h-3.5 text-zinc-400" />
-          </button>
+          {/* Three-dots consolidated dropdown */}
+          <div className="relative">
+            {/* Click-outside backdrop layer */}
+            {showThreeDotsMenu && (
+              <div 
+                className="fixed inset-0 z-[60]" 
+                onClick={() => setShowThreeDotsMenu(false)} 
+              />
+            )}
 
-
-
-          {/* 3. Desktop Admin Panel trigger button */}
-          {isAdmin && (
-            <button 
-              onClick={() => setShowAdminPanel(true)}
-              className="hidden lg:flex items-center gap-2 bg-zinc-900 border border-zinc-805 px-4 py-1.5 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-all text-white"
+            <button
+              onClick={() => setShowThreeDotsMenu(!showThreeDotsMenu)}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-all z-[70] relative cursor-pointer ${
+                showThreeDotsMenu 
+                  ? 'bg-red-600 border-red-500 text-white shadow-lg' 
+                  : 'bg-[#0c0c0e]/80 border-zinc-900 hover:bg-zinc-900 hover:border-zinc-700 hover:text-amber-500 text-zinc-300'
+              }`}
+              title={language === 'ar' ? 'المزيد والخيارات التقديرية' : 'More Options & Tools'}
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-red-500" />
-              <span>المدير</span>
+              <MoreVertical className="w-5 h-5" />
             </button>
-          )}
+
+            <AnimatePresence>
+              {showThreeDotsMenu && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 15 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 15 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
+                  className={`absolute left-0 mt-3 w-64 rounded-2xl p-2.5 z-[70] border shadow-2xl text-right flex flex-col gap-1 ${
+                    localTheme === 'light' 
+                      ? 'bg-white text-zinc-900 border-zinc-200' 
+                      : 'bg-[#0a0a0c] text-white border-zinc-850/80 shadow-black/80'
+                  }`}
+                  dir={language === 'ar' ? 'rtl' : 'ltr'}
+                >
+                  {/* Dropdown Header section */}
+                  <div className={`px-2 py-1.5 border-b mb-1 flex items-center justify-between ${localTheme === 'light' ? 'border-zinc-100' : 'border-zinc-900'}`}>
+                    <span className="text-[10px] text-zinc-500 font-extrabold uppercase tracking-widest">
+                      {language === 'ar' ? 'لوحة الخيارات السريعة' : 'Quick Control Board'}
+                    </span>
+                    <Flame className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+                  </div>
+
+                  {/* 1. Search */}
+                  <button
+                    onClick={() => {
+                      setShowThreeDotsMenu(false);
+                      setActiveMainTab('search');
+                      setTimeout(() => {
+                        const sInput = document.getElementById('search-input-field');
+                        if (sInput) sInput.focus();
+                      }, 100);
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
+                      localTheme === 'light'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Search className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>{language === 'ar' ? 'البحث عن مودات كرافت' : 'Search Mods'}</span>
+                    </div>
+                  </button>
+
+                  {/* 2. Favorites */}
+                  <button
+                    onClick={() => {
+                      setShowThreeDotsMenu(false);
+                      setActiveMainTab('favorites');
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
+                      localTheme === 'light'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Heart className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>{language === 'ar' ? 'المفضلات والقلوب' : 'My Favorites'}</span>
+                    </div>
+                    {userProfile?.favorites && userProfile.favorites.length > 0 && (
+                      <span className="text-[9px] bg-red-600/20 text-red-400 font-black px-1.5 py-0.5 rounded-full leading-none">
+                        {userProfile.favorites.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* 3. My Account */}
+                  <button
+                    onClick={() => {
+                      setShowThreeDotsMenu(false);
+                      if (user) {
+                        setShowUserPanel(true);
+                      } else {
+                        setLoginMode('email-signin');
+                        setShowLoginModal(true);
+                      }
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
+                      localTheme === 'light'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <UserIcon className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>{language === 'ar' ? 'الملف الشخصي وحسابي' : 'Control Panel / Account'}</span>
+                    </div>
+                  </button>
+
+                  {/* 4. Support Tickets */}
+                  <button
+                    onClick={() => {
+                      setShowThreeDotsMenu(false);
+                      if (user) {
+                        setShowUserPanel(true);
+                      } else {
+                        setLoginMode('email-signin');
+                        setShowLoginModal(true);
+                      }
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
+                      localTheme === 'light'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <MessageSquare className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>{language === 'ar' ? 'الدعم الفني والشكاوى' : 'Get Help / Tickets'}</span>
+                    </div>
+                  </button>
+
+                  {/* 5. Suggest a Mod */}
+                  <button
+                    onClick={() => {
+                      setShowThreeDotsMenu(false);
+                      setShowSuggestModal(true);
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
+                      localTheme === 'light'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Sparkles className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>{language === 'ar' ? 'تقديم اقتراح لمود جديد 💡' : 'Suggest a New Mod 💡'}</span>
+                    </div>
+                  </button>
+
+                  {/* 6. View Suggestions */}
+                  <button
+                    onClick={() => {
+                      setShowThreeDotsMenu(false);
+                      setShowListModal(true);
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer border border-transparent ${
+                      localTheme === 'light'
+                        ? 'text-zinc-700 hover:bg-zinc-100'
+                        : 'text-zinc-300 hover:text-white hover:bg-red-650/10 hover:border-red-650/15'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ClipboardList className="w-4 h-4 text-red-500 shrink-0" />
+                      <span>{language === 'ar' ? 'قائمة اقتراحات الأعضاء 📂' : 'Open Member Suggestions 📂'}</span>
+                    </div>
+                  </button>
+
+                  {/* 5. Theme Settings */}
+                  <div className={`border-t my-1.5 pt-2 px-1 ${localTheme === 'light' ? 'border-zinc-100' : 'border-zinc-900'}`}>
+                    <div className="flex items-center justify-between px-2 mb-1.5">
+                      <span className="text-[9px] text-zinc-500 font-extrabold uppercase">{language === 'ar' ? 'مظهر الموقع' : 'Theme'}</span>
+                      <Palette className="w-3 h-3 text-zinc-600" />
+                    </div>
+                    <div className={`grid grid-cols-2 gap-1 p-1 rounded-xl border ${localTheme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-900'}`}>
+                      <button
+                        onClick={async () => {
+                          setLocalTheme('dark');
+                          localStorage.setItem('theme', 'dark');
+                          if (user) await updateProfile({ theme: 'dark' });
+                        }}
+                        className={`py-1.5 rounded-lg text-[9px] font-black flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                          localTheme === 'dark' 
+                            ? 'bg-red-600 text-white shadow-md' 
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        <Moon className="w-3 h-3 shrink-0" />
+                        <span>{language === 'ar' ? 'داكن' : 'Dark'}</span>
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setLocalTheme('light');
+                          localStorage.setItem('theme', 'light');
+                          if (user) await updateProfile({ theme: 'light' });
+                        }}
+                        className={`py-1.5 rounded-lg text-[9px] font-black flex items-center justify-center gap-1 cursor-pointer transition-all ${
+                          localTheme === 'light' 
+                            ? 'bg-red-600 text-white shadow-md' 
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        <Sun className="w-3 h-3 shrink-0" />
+                        <span>{language === 'ar' ? 'فاتح' : 'Light'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 6. Language Select */}
+                  <div className="px-1 mt-1 mb-1">
+                    <div className="flex items-center justify-between px-2 mb-1.5">
+                      <span className="text-[9px] text-zinc-500 font-extrabold uppercase">{language === 'ar' ? 'لغة الموقع' : 'Language'}</span>
+                      <Languages className="w-3 h-3 text-zinc-600" />
+                    </div>
+                    <div className={`grid grid-cols-2 gap-1 p-1 rounded-xl border ${localTheme === 'light' ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950 border-zinc-900'}`}>
+                      <button
+                        onClick={() => setLanguage('ar')}
+                        className={`py-1.5 rounded-lg text-[9px] font-black flex items-center justify-center cursor-pointer transition-all ${
+                          language === 'ar' 
+                            ? 'bg-red-600 text-white shadow-md' 
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        <span>العربية</span>
+                      </button>
+                      <button
+                        onClick={() => setLanguage('en')}
+                        className={`py-1.5 rounded-lg text-[9px] font-black flex items-center justify-center cursor-pointer transition-all ${
+                          language === 'en' 
+                            ? 'bg-red-600 text-white shadow-md' 
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        <span>English</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 7. Administrator Terminal */}
+                  {isAdmin && (
+                    <div className={`border-t mt-1.5 pt-1.5 ${localTheme === 'light' ? 'border-zinc-200' : 'border-zinc-900'}`}>
+                      <button
+                        onClick={() => {
+                          setShowThreeDotsMenu(false);
+                          setShowAdminPanel(true);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl text-xs font-black text-red-500 hover:bg-zinc-900/50 cursor-pointer transition-all"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-red-500 shrink-0 animate-bounce" />
+                        <span>{language === 'ar' ? 'لوحة كرافت للمدير' : 'Admin Terminal'}</span>
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </nav>
 
@@ -1229,14 +2333,76 @@ const AppContent = () => {
                 changeEdition={changeEdition}
                 isLoggedIn={!!user}
                 onImageClick={handleImageClickPointsClaim}
+                userEmail={user?.email || undefined}
+                isAdmin={user?.email === 'frassa0000@gmail.com'}
+                showSuggestModal={showSuggestModal}
+                setShowSuggestModal={setShowSuggestModal}
+                showListModal={showListModal}
+                setShowListModal={setShowListModal}
               />
 
 
 
               {activeSubTab === 'home' ? (
                 <div className="space-y-12">
-                  {games.length > 0 && (
+                  {displayedGames.length > 0 && (
                     <>
+                      {/* BROWSE SECTIONS / CATEGORIES MATCHING IMAGE */}
+                      <section className="space-y-6" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                        <div className="flex items-center justify-between border-b border-zinc-900/40 pb-3">
+                          <div className="flex items-center gap-2.5">
+                            {/* Bento grid icon represented by 4 squares */}
+                            <div className="grid grid-cols-2 gap-0.5 w-5 h-5 shrink-0 text-[#f59e0b] fill-[#f59e0b]">
+                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
+                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
+                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
+                              <div className="w-2 h-2 rounded-sm bg-[#f59e0b]" />
+                            </div>
+                            <h3 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                              <span>{language === 'ar' ? 'تصفح الأقسام' : 'Browse Sections'}</span>
+                            </h3>
+                          </div>
+                        </div>
+
+                        {/* Slider Scrollable / Grid Area */}
+                        <div 
+                          id="categories-slider-rail"
+                          className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 w-full"
+                        >
+                          {[
+                            { id: 'mobs', labelAr: 'مودات الكائنات', labelEn: 'Mobs Mods', countAr: '156 مود', countEn: '156 Mods', icon: Ghost, refCategory: 'مودات', colorClass: 'text-purple-400 bg-purple-500/5 border-purple-500/10 hover:border-purple-500/30' },
+                            { id: 'world', labelAr: 'مودات العالم', labelEn: 'World Mods', countAr: '98 مود', countEn: '98 Mods', icon: Layers, refCategory: 'خرائط', colorClass: 'text-emerald-400 bg-emerald-500/5 border-emerald-500/10 hover:border-emerald-500/30' },
+                            { id: 'tools', labelAr: 'مودات الأدوات', labelEn: 'Tools Mods', countAr: '210 مود', countEn: '210 Mods', icon: Hammer, refCategory: 'موارد', colorClass: 'text-cyan-400 bg-cyan-500/5 border-cyan-500/10 hover:border-cyan-500/30' },
+                            { id: 'dragons', labelAr: 'مودات التنين', labelEn: 'Dragon Mods', countAr: '84 مود', countEn: '84 Mods', icon: Flame, refCategory: 'مودات', colorClass: 'text-green-400 bg-green-500/5 border-green-500/10 hover:border-green-500/30' },
+                            { id: 'adventures', labelAr: 'مودات المغامرات', labelEn: 'Adventure Mods', countAr: '91 مود', countEn: '91 Mods', icon: Sword, refCategory: 'مودات', colorClass: 'text-sky-400 bg-sky-500/5 border-sky-500/10 hover:border-sky-500/30' },
+                          ].map((cat, i) => {
+                            const IconComponent = cat.icon;
+                            return (
+                              <div 
+                                key={cat.id}
+                                onClick={() => {
+                                  setSelectedCategory(cat.refCategory);
+                                  const el = document.getElementById('available-mods-anchor');
+                                  if (el) el.scrollIntoView({ behavior: 'smooth' });
+                                }}
+                                className="bg-[#0c0c0e]/90 border border-zinc-900/60 rounded-2xl p-5 flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-lg hover:shadow-amber-500/5 transition duration-150 group shrink-0"
+                              >
+                                {/* Glowing Centered Bubble for Icon Component */}
+                                <div className={`w-14 h-14 rounded-full flex items-center justify-center border ${cat.colorClass} mb-4 group-hover:scale-105 transition-transform`}>
+                                  <IconComponent className="w-6 h-6 stroke-[2]" />
+                                </div>
+                                <h4 className="text-sm font-black text-white group-hover:text-[#f59e0b] transition-colors">
+                                  {language === 'ar' ? cat.labelAr : cat.labelEn}
+                                </h4>
+                                <p className="text-[11px] text-zinc-500 font-bold mt-1">
+                                  {language === 'ar' ? cat.countAr : cat.countEn}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+
                       {/* INTERACTIVE SPOTLIGHT DECK SPOTLIGHT */}
                       <section className="space-y-4">
                         <div className="flex items-center justify-between border-b border-zinc-90 w-full pb-3">
@@ -1455,11 +2621,18 @@ const AppContent = () => {
                                 viewport={{ once: true, margin: "-40px" }}
                                 transition={{ duration: 0.4, delay: idx * 0.05 }}
                                 whileHover={{ y: -4, transition: { duration: 0.15 } }}
-                                className={`rounded-2xl border overflow-hidden p-3.5 flex flex-col justify-between transition-all duration-300 shadow-xl ${
+                                className={`rounded-2xl border overflow-hidden p-3.5 flex flex-col justify-between transition-all duration-300 shadow-xl cursor-pointer ${
                                   isMainSpotlight 
-                                    ? 'bg-gradient-to-br from-zinc-950 via-zinc-950 to-amber-950/20 border-amber-500/20' 
-                                    : 'bg-zinc-950 border-zinc-900'
+                                    ? 'bg-gradient-to-br from-zinc-950 via-zinc-950 to-amber-950/20 border-amber-500/20 hover:border-amber-500/30' 
+                                    : 'bg-zinc-950 border-zinc-900 hover:border-zinc-800'
                                 }`}
+                                onClick={(e) => {
+                                  const target = e.target as HTMLElement;
+                                  if (target.closest('button') || target.closest('a')) {
+                                    return;
+                                  }
+                                  setSelectedGameForDetails(item);
+                                }}
                               >
                                 <div className="space-y-3.5 text-right">
                                   {/* Thumbnail preview aspect header */}
@@ -1576,7 +2749,14 @@ const AppContent = () => {
                         viewport={{ once: true, margin: "-80px" }}
                         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
                         whileHover={{ y: -6, transition: { duration: 0.2 } }}
-                        className="bg-zinc-950 border border-zinc-900 rounded-[2rem] p-4 flex flex-col md:flex-row gap-4 items-center group hover:border-zinc-800 transition text-right bg-zinc-950"
+                        className="bg-zinc-950 border border-zinc-900 rounded-[2rem] p-4 flex flex-col md:flex-row gap-4 items-center group hover:border-zinc-800 transition text-right cursor-pointer bg-zinc-950"
+                        onClick={(e) => {
+                          const target = e.target as HTMLElement;
+                          if (target.closest('button') || target.closest('a')) {
+                            return;
+                          }
+                          setSelectedGameForDetails(mod);
+                        }}
                       >
                         <img 
                           src={mod.thumbnail || null} 
@@ -1588,327 +2768,716 @@ const AppContent = () => {
                             <span className="text-[9px] font-black text-red-500 uppercase bg-red-650/10 px-2 py-0.5 rounded border border-red-500/10">
                               {mod.category}
                             </span>
-                            <h3 className="text-base font-black text-white mt-1 group-hover:text-red-400 transition">
+                            <h3 className="text-base font-black text-white hover:text-red-500 transition-colors">
                               {mod.title}
                             </h3>
-                            <p className="text-zinc-505 text-xs leading-normal line-clamp-1">
-                              {language === 'ar' ? 'مود معتمد وآمن تماماً ومتوافق مع أحدث إصدارات الألعاب.' : 'Tested, authentic premium addon package ready for instant setup.'}
-                            </p>
                           </div>
-                          
-                           <button 
-                            onClick={() => triggerDownload(mod.title, mod.downloadUrl, language === 'ar' ? 'مود معتمد وآمن تماماً ومتوافق مع أحدث إصدارات الألعاب.' : 'Tested, authentic premium addon package ready for instant setup.', mod.category)}
-                            className="bg-gradient-to-r from-red-650 to-amber-650 hover:from-red-600 hover:to-amber-500 text-white text-xs font-black px-4.5 py-2.5 rounded-xl transition shadow-lg shadow-red-950/20 w-max flex items-center gap-1.5 border border-red-500/10 cursor-pointer hover:scale-[1.03] active:scale-95 duration-150"
-                          >
-                            <Download className="w-3.5 h-3.5 text-white" />
-                            <span>{language === 'ar' ? 'تحميل المود' : 'Download Mod'}</span>
-                          </button>
+                          <p className="text-xs text-zinc-400 line-clamp-2">
+                            {mod.description}
+                          </p>
+                          <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+                            <span>📥 {mod.downloads || '120k'}</span>
+                            <span>⭐ {mod.rating || '4.9'}</span>
+                          </div>
                         </div>
                       </motion.div>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* This is the marketplace container when on home tab */}
-          {activeMainTab === 'home' && activeSubTab === 'home' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 pt-4">
-              {/* 1. Marketplace Core Catalog List (Column Span 8) */}
-              <div id="available-mods-anchor" className="lg:col-span-12 xl:col-span-8 space-y-6 text-right">
-                {/* Title Bar */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-zinc-900 pb-4 gap-2">
-                  <div className="space-y-1">
-                    <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2 justify-start">
-                      <TrendingUp className="w-6 h-6 text-red-500" />
-                      <span>{t.availableMods}</span>
-                    </h2>
-                    <p className="text-xs font-semibold text-zinc-500">
-                      {language === 'ar' ? 'تصفح وحمل مئات المودات المعتمدة والآمنة فوراً' : 'Browse and download secure community contributions instantly'}
-                    </p>
-                  </div>
+              {/* This is the marketplace container when on home tab */}
+              {activeMainTab === 'home' && activeSubTab === 'home' && (
+                <div className="space-y-12 pt-4 max-w-4xl mx-auto" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                  
+                  {/* Premium High-Fidelity Marketplace Categories (Exactly matching the user's reference image) */}
+                  <div className="flex flex-col items-center justify-center w-full select-none py-8 border-b border-zinc-900/40" dir="ltr">
+                    {/* MARKETPLACE Header */}
+                    <div className="text-center mb-10">
+                      <h1 className="text-4xl md:text-6xl font-black tracking-[0.18em] text-white uppercase font-sans drop-shadow-[0_4px_16px_rgba(0,0,0,0.95)]">
+                        MARKETPLACE
+                      </h1>
+                      <div className="h-[2.5px] w-40 bg-gradient-to-r from-transparent via-amber-500/40 to-transparent mx-auto mt-3" />
+                    </div>
 
-                  {/* Sorting and Stats Selector */}
-                  <div className="flex flex-wrap items-center gap-3 self-start sm:self-center">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-zinc-500">
-                        {language === 'ar' ? 'ترتيب حسب:' : 'Sort By:'}
-                      </span>
-                      <div className="relative inline-block text-left text-zinc-400">
-                        <select
-                          id="marketplace-sort-dropdown"
-                          value={sortBy}
-                          onChange={(e) => setSortBy(e.target.value as any)}
-                          className={`appearance-none text-xs font-black rounded-xl pl-3 pr-8 py-2 border transition-all cursor-pointer ${
-                            localTheme === 'light' 
-                              ? 'bg-zinc-100 border-zinc-200 text-zinc-850 hover:bg-zinc-200' 
-                              : 'bg-zinc-950 border-zinc-900 text-white hover:bg-zinc-900'
+                    {/* Symmetrical Bento-style Categories Grid */}
+                    <div className="w-full max-w-xl px-4 flex flex-col items-center gap-5">
+                      
+                      {/* Row 1: ALL / الكل (Centered Silver-White Capsule) */}
+                      <div className="w-full flex justify-center">
+                        <button
+                          onClick={() => changeCategoryAndScroll('الكل')}
+                          className={`w-full max-w-[280px] h-[54px] rounded-full border px-6 flex items-center justify-between transition-all duration-300 relative overflow-hidden cursor-pointer select-none group ${
+                            selectedCategory === 'الكل'
+                              ? 'bg-gradient-to-b from-zinc-900 to-black border-white/90 shadow-[0_0_25px_rgba(255,255,255,0.18)] scale-[1.03]'
+                              : 'bg-gradient-to-b from-zinc-950 to-[#0c0c0e] border-zinc-800/80 hover:border-zinc-700/80 hover:scale-[1.01]'
                           }`}
                         >
-                          <option value="newest" className="bg-zinc-950 font-black">
-                            {language === 'ar' ? 'الأحدث' : 'Newest'}
-                          </option>
-                          <option value="highest_rated" className="bg-zinc-950 font-black">
-                            {language === 'ar' ? 'الأعلى تقييماً' : 'Highest Rated'}
-                          </option>
-                          <option value="most_downloaded" className="bg-zinc-950 font-black">
-                            {language === 'ar' ? 'الأكثر تحميلاً' : 'Most Downloaded'}
-                          </option>
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-zinc-500">
-                          <svg className="fill-current h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                            <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                          </svg>
+                          {/* Inner soft radial ambient glow */}
+                          {selectedCategory === 'الكل' && (
+                            <div className="absolute inset-0 bg-white/[0.03] blur-md pointer-events-none" />
+                          )}
+                          
+                          {/* Left Icon with subtle pixel shadow */}
+                          <div className="flex items-center justify-center w-10 h-10 shrink-0">
+                            <svg className={`w-6 h-6 transition-transform duration-300 group-hover:scale-110 ${selectedCategory === 'الكل' ? 'drop-shadow-[0_0_8px_rgba(255,255,255,0.6)]' : 'opacity-60 group-hover:opacity-100'}`} viewBox="0 0 24 24">
+                              <polygon points="12,3 14,9 20,9 15,13 17,19 12,15 7,19 9,13 4,9 10,9" fill={selectedCategory === 'الكل' ? '#ffffff' : '#9ca3af'} />
+                              <polygon points="12,5 13.5,9.5 18,9.5 14.5,12.5 16,17 12,14 8,17 9.5,12.5 6,9.5 10.5,9.5" fill="#ffffff" opacity="0.9" />
+                            </svg>
+                          </div>
+
+                          {/* Category Name Label (All Caps, Geometric) */}
+                          <div className="flex flex-col items-end text-right">
+                            <span className={`text-sm font-black tracking-widest ${selectedCategory === 'الكل' ? 'text-white' : 'text-zinc-400 group-hover:text-zinc-300'}`}>
+                              {language === 'ar' ? 'الكل' : 'ALL'}
+                            </span>
+                            <span className="text-[8px] font-black tracking-wider text-zinc-650 uppercase">
+                              {language === 'ar' ? 'جميع التصنيفات' : 'EVERYTHING'}
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Row 2: ADD-ONS and MAPS (Side by side) */}
+                      <div className="flex flex-col sm:flex-row gap-5 w-full justify-center items-center">
+                        {/* ADD-ONS Capsule (Gold theme) */}
+                        <button
+                          onClick={() => changeCategoryAndScroll(language === 'ar' ? 'مودات' : 'Mods')}
+                          className={`w-full max-w-[280px] h-[54px] rounded-full border px-6 flex items-center justify-between transition-all duration-300 relative overflow-hidden cursor-pointer select-none group ${
+                            (selectedCategory === 'مودات' || selectedCategory === 'Mods')
+                              ? 'bg-gradient-to-b from-zinc-900 to-black border-amber-500/90 shadow-[0_0_25px_rgba(245,158,11,0.22)] scale-[1.03]'
+                              : 'bg-gradient-to-b from-zinc-950 to-[#0c0c0e] border-[#b45309]/30 hover:border-[#b45309]/60 hover:scale-[1.01]'
+                          }`}
+                        >
+                          {/* Inner soft radial ambient glow */}
+                          {(selectedCategory === 'مودات' || selectedCategory === 'Mods') && (
+                            <div className="absolute inset-0 bg-amber-500/[0.04] blur-md pointer-events-none" />
+                          )}
+
+                          {/* Left Icon: Isometric Gold Cube */}
+                          <div className="flex items-center justify-center w-10 h-10 shrink-0">
+                            <svg className={`w-7 h-7 transition-transform duration-300 group-hover:scale-110 ${
+                              (selectedCategory === 'مودات' || selectedCategory === 'Mods') 
+                                ? 'drop-shadow-[0_0_8px_rgba(245,158,11,0.7)]' 
+                                : 'opacity-60 group-hover:opacity-100'
+                            }`} viewBox="0 0 24 24">
+                              <polygon points="12,3 19,7 12,11 5,7" fill="#fef08a" />
+                              <polygon points="5,7 12,11 12,18 5,14" fill="#ca8a04" />
+                              <polygon points="12,11 19,7 19,14 12,18" fill="#a16207" />
+                              <g transform="translate(15, 1.5)">
+                                <rect x="2" y="0" width="2" height="6" fill="#facc15" />
+                                <rect x="0" y="2" width="6" height="2" fill="#facc15" />
+                                <rect x="2.5" y="0.5" width="1" height="5" fill="#ffffff" opacity="0.8" />
+                                <rect x="0.5" y="2.5" width="5" height="1" fill="#ffffff" opacity="0.8" />
+                              </g>
+                            </svg>
+                          </div>
+
+                          {/* Category Name Label */}
+                          <div className="flex flex-col items-end text-right">
+                            <span className={`text-sm font-black tracking-widest ${
+                              (selectedCategory === 'مودات' || selectedCategory === 'Mods') ? 'text-[#fcd34d]' : 'text-amber-200/60 group-hover:text-amber-200/85'
+                            }`}>
+                              {language === 'ar' ? 'المودات' : 'ADD-ONS'}
+                            </span>
+                            <span className="text-[8px] font-black tracking-wider text-zinc-650 uppercase">
+                              {language === 'ar' ? 'تعديلات اللعبة' : 'MODPACKS'}
+                            </span>
+                          </div>
+                        </button>
+
+                        {/* MAPS Capsule (Orange theme) */}
+                        <button
+                          onClick={() => changeCategoryAndScroll(language === 'ar' ? 'خرائط' : 'Maps')}
+                          className={`w-full max-w-[280px] h-[54px] rounded-full border px-6 flex items-center justify-between transition-all duration-300 relative overflow-hidden cursor-pointer select-none group ${
+                            (selectedCategory === 'خرائط' || selectedCategory === 'Maps')
+                              ? 'bg-gradient-to-b from-zinc-900 to-black border-orange-500/90 shadow-[0_0_25px_rgba(234,88,12,0.22)] scale-[1.03]'
+                              : 'bg-gradient-to-b from-zinc-950 to-[#0c0c0e] border-[#c2410c]/30 hover:border-[#c2410c]/60 hover:scale-[1.01]'
+                          }`}
+                        >
+                          {/* Inner soft radial ambient glow */}
+                          {(selectedCategory === 'خرائط' || selectedCategory === 'Maps') && (
+                            <div className="absolute inset-0 bg-orange-500/[0.04] blur-md pointer-events-none" />
+                          )}
+
+                          {/* Left Icon: Saturn Planet */}
+                          <div className="flex items-center justify-center w-10 h-10 shrink-0">
+                            <svg className={`w-7 h-7 transition-transform duration-300 group-hover:scale-110 ${
+                              (selectedCategory === 'خرائط' || selectedCategory === 'Maps') 
+                                ? 'drop-shadow-[0_0_8px_rgba(234,88,12,0.7)]' 
+                                : 'opacity-60 group-hover:opacity-100'
+                            }`} viewBox="0 0 24 24">
+                              <path d="M 4,14 Q 8,7 20,10" fill="none" stroke="#ea580c" strokeWidth="2.5" strokeLinecap="round" opacity="0.7" />
+                              <circle cx="12" cy="12" r="6" fill="#ea580c" />
+                              <circle cx="10.5" cy="10.5" r="5" fill="#f97316" />
+                              <path d="M 9,9 Q 12,12 15,15" fill="none" stroke="#fdba74" strokeWidth="1.5" strokeLinecap="round" />
+                              <path d="M 3,13 Q 11,17 22,12" fill="none" stroke="#f97316" strokeWidth="3.5" strokeLinecap="round" />
+                              <path d="M 5,13 Q 11,16.5 20,12.5" fill="none" stroke="#fef08a" strokeWidth="1" strokeLinecap="round" opacity="0.9" />
+                            </svg>
+                          </div>
+
+                          {/* Category Name Label */}
+                          <div className="flex flex-col items-end text-right">
+                            <span className={`text-sm font-black tracking-widest ${
+                              (selectedCategory === 'خرائط' || selectedCategory === 'Maps') ? 'text-[#fed7aa]' : 'text-orange-200/60 group-hover:text-orange-200/85'
+                            }`}>
+                              {language === 'ar' ? 'الخرائط' : 'MAPS'}
+                            </span>
+                            <span className="text-[8px] font-black tracking-wider text-zinc-650 uppercase">
+                              {language === 'ar' ? 'عوالم ومغامرات' : 'WORLDS'}
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Row 3: TEXTURES (Centered Green Capsule) */}
+                      <div className="w-full flex justify-center">
+                        <button
+                          onClick={() => changeCategoryAndScroll(language === 'ar' ? 'شيدرز' : 'Shaders')}
+                          className={`w-full max-w-[280px] h-[54px] rounded-full border px-6 flex items-center justify-between transition-all duration-300 relative overflow-hidden cursor-pointer select-none group ${
+                            (selectedCategory === 'شيدرز' || selectedCategory === 'Shaders')
+                              ? 'bg-gradient-to-b from-zinc-900 to-black border-emerald-500/90 shadow-[0_0_25px_rgba(16,185,129,0.22)] scale-[1.03]'
+                              : 'bg-gradient-to-b from-zinc-950 to-[#0c0c0e] border-[#047857]/30 hover:border-[#047857]/60 hover:scale-[1.01]'
+                          }`}
+                        >
+                          {/* Inner soft radial ambient glow */}
+                          {(selectedCategory === 'شيدرز' || selectedCategory === 'Shaders') && (
+                            <div className="absolute inset-0 bg-emerald-500/[0.04] blur-md pointer-events-none" />
+                          )}
+
+                          {/* Left Icon: Paintbrush */}
+                          <div className="flex items-center justify-center w-10 h-10 shrink-0">
+                            <svg className={`w-7 h-7 transition-transform duration-300 group-hover:scale-110 ${
+                              (selectedCategory === 'شيدرز' || selectedCategory === 'Shaders') 
+                                ? 'drop-shadow-[0_0_8px_rgba(16,185,129,0.7)]' 
+                                : 'opacity-60 group-hover:opacity-100'
+                            }`} viewBox="0 0 24 24" transform="rotate(-15)">
+                              <rect x="4" y="16" width="3" height="6" fill="#78350f" transform="rotate(-45 5.5 19)" />
+                              <rect x="5.5" y="14" width="4" height="3" fill="#9ca3af" transform="rotate(-45 7.5 15.5)" />
+                              <path d="M 10,10 L 16,4 L 20,8 L 14,14 Z" fill="#059669" />
+                              <path d="M 12,8 L 16,4 L 19,7 L 15,11 Z" fill="#34d399" />
+                              <path d="M 15,5 L 17,3 L 21,7 L 19,9 Z" fill="#a7f3d0" />
+                              <circle cx="21" cy="12" r="1.5" fill="#34d399" />
+                              <circle cx="18" cy="15" r="1" fill="#10b981" />
+                            </svg>
+                          </div>
+
+                          {/* Category Name Label */}
+                          <div className="flex flex-col items-end text-right">
+                            <span className={`text-sm font-black tracking-widest ${
+                              (selectedCategory === 'شيدرز' || selectedCategory === 'Shaders') ? 'text-[#a7f3d0]' : 'text-emerald-200/60 group-hover:text-emerald-200/85'
+                            }`}>
+                              {language === 'ar' ? 'شيدرز' : 'TEXTURES'}
+                            </span>
+                            <span className="text-[8px] font-black tracking-wider text-zinc-650 uppercase">
+                              {language === 'ar' ? 'رسوميات واقعية' : 'GRAPHICS'}
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+
+                      {/* Row 4: SKINS (Centered Purple Capsule with NEW badge) */}
+                      <div className="w-full flex justify-center relative">
+                        {/* Bouncing Purple NEW Badge */}
+                        <motion.div 
+                          animate={{ y: [0, -4, 0] }}
+                          transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                          className="absolute -top-3.5 right-[calc(50%-100px)] z-10 select-none pointer-events-none"
+                        >
+                          <span className="bg-purple-600 border border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)] text-[8px] font-black tracking-wider px-2.5 py-0.5 rounded-full text-white uppercase font-mono">
+                            NEW
+                          </span>
+                        </motion.div>
+
+                        <button
+                          onClick={() => changeCategoryAndScroll(language === 'ar' ? 'سكنات' : 'Skins')}
+                          className={`w-full max-w-[280px] h-[54px] rounded-full border px-6 flex items-center justify-between transition-all duration-300 relative overflow-hidden cursor-pointer select-none group ${
+                            (selectedCategory === 'سكنات' || selectedCategory === 'Skins')
+                              ? 'bg-gradient-to-b from-zinc-900 to-black border-purple-500/90 shadow-[0_0_25px_rgba(168,85,247,0.22)] scale-[1.03]'
+                              : 'bg-gradient-to-b from-zinc-950 to-[#0c0c0e] border-[#6b21a8]/30 hover:border-[#6b21a8]/60 hover:scale-[1.01]'
+                          }`}
+                        >
+                          {/* Inner soft radial ambient glow */}
+                          {(selectedCategory === 'سكنات' || selectedCategory === 'Skins') && (
+                            <div className="absolute inset-0 bg-purple-500/[0.04] blur-md pointer-events-none" />
+                          )}
+
+                          {/* Left Icon: Hanger */}
+                          <div className="flex items-center justify-center w-10 h-10 shrink-0">
+                            <svg className={`w-7 h-7 transition-transform duration-300 group-hover:scale-110 ${
+                              (selectedCategory === 'سكنات' || selectedCategory === 'Skins') 
+                                ? 'drop-shadow-[0_0_8px_rgba(168,85,247,0.7)]' 
+                                : 'opacity-60 group-hover:opacity-100'
+                            }`} viewBox="0 0 24 24">
+                              <path d="M 12,9 C 12,6 14,6 14,8 C 14,9 13,10 12,11" fill="none" stroke="#c084fc" strokeWidth="2.5" strokeLinecap="round" />
+                              <polygon points="12,11 21,17 3,17" fill="none" stroke="#a855f7" strokeWidth="2.5" strokeLinejoin="round" />
+                              <polygon points="12,11.5 19.5,16.5 4.5,16.5" fill="none" stroke="#f3e8ff" strokeWidth="1" strokeLinejoin="round" opacity="0.9" />
+                              <line x1="6" y1="17" x2="18" y2="17" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" opacity="0.8" />
+                            </svg>
+                          </div>
+
+                          {/* Category Name Label */}
+                          <div className="flex flex-col items-end text-right">
+                            <span className={`text-sm font-black tracking-widest ${
+                              (selectedCategory === 'سكنات' || selectedCategory === 'Skins') ? 'text-[#f3e8ff]' : 'text-purple-200/60 group-hover:text-purple-200/85'
+                            }`}>
+                              {language === 'ar' ? 'السكنات' : 'SKINS'}
+                            </span>
+                            <span className="text-[8px] font-black tracking-wider text-zinc-650 uppercase">
+                              {language === 'ar' ? 'مظاهر اللاعبين' : 'OUTFITS'}
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+
+                    </div>
+                  </div>
+
+                  {/* DYNAMIC AND HIGH-FIDELITY HOME GAMES LIST SECTION */}
+                  <div id="available-mods-anchor" className="space-y-12 text-right">
+                    {/* If selectedCategory is 'الكل', we show the three gorgeous sections from the screenshot */}
+                    {selectedCategory === 'الكل' ? (
+                      <div className="space-y-12">
+                        {/* Section 1: Latest Mods (أحدث المودات) - Red Bar */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b border-zinc-900/40 pb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-[5px] h-6 rounded-full bg-[#ef233c] shadow-[0_0_8px_rgba(239,35,60,0.5)]" />
+                              <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                                {language === 'ar' ? 'أحدث المودات' : 'Latest Mods'}
+                              </h2>
+                            </div>
+                            <span className="text-xs font-black text-amber-500 bg-amber-500/5 px-3 py-1.5 rounded-xl border border-amber-500/10">
+                              {latestModsList.length} {language === 'ar' ? 'مود متوفر' : 'Mods Available'}
+                            </span>
+                          </div>
+
+                          {latestModsList.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                              {latestModsList.slice(0, 4).map((game) => (
+                                <motion.div
+                                  key={game.id}
+                                  initial={{ opacity: 0, y: 15 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="bg-[#0c0c0e]/95 border border-zinc-900 hover:border-zinc-850 rounded-[2.5rem] p-4 flex flex-col justify-between transition-all duration-300 group relative cursor-pointer shadow-lg hover:shadow-zinc-950/40"
+                                  onClick={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    if (target.closest('button') || target.closest('a')) {
+                                      return;
+                                    }
+                                    setSelectedGameForDetails(game);
+                                  }}
+                                >
+                                  <div className="relative w-full aspect-[4/3] rounded-[2rem] overflow-hidden bg-zinc-950 shrink-0 border border-zinc-900/60 shadow-inner">
+                                    <img 
+                                      src={(game.thumbnail && game.thumbnail !== "") ? game.thumbnail : 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'} 
+                                      alt={game.title} 
+                                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    {/* Add-On Label */}
+                                    {(game.category === 'مودات' || game.id === 'herschel-backpack' || game.id === 'essentials') && (
+                                      <div className="absolute bottom-3 left-3 bg-black/90 border-2 border-[#caa43c] px-3 py-1 text-[#caa43c] text-[11px] font-black font-mono rounded-lg tracking-wider uppercase shadow-lg select-none">
+                                        Add-On
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-col gap-2 mt-4 text-right">
+                                    <h3 className="text-base sm:text-lg font-black text-white group-hover:text-[#caa43c] transition-colors leading-snug truncate">
+                                      {game.title}
+                                    </h3>
+                                    <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2 min-h-[32px]">
+                                      {game.description}
+                                    </p>
+                                    
+                                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-900/40">
+                                      <span className="bg-[#ef233c] text-white font-black text-[10px] sm:text-xs px-3 py-1 rounded-xl uppercase tracking-wider shadow-sm">
+                                        {language === 'ar' ? 'إضافات' : 'ADD-ONS'}
+                                      </span>
+
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id);
+                                        }}
+                                        className="bg-[#0c0c0e] hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 text-[10px] sm:text-xs font-black px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md"
+                                      >
+                                        <span>
+                                          {(() => {
+                                            const cat = (game.category || '').toLowerCase();
+                                            const isAr = language === 'ar';
+                                            if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                                            if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                                            if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                                            if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                                            return isAr ? 'تنزيل المود' : 'Download Mod';
+                                          })()}
+                                        </span>
+                                        <Download className="w-3.5 h-3.5 stroke-[3px]" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center py-10 bg-zinc-950/50 border border-zinc-900/60 rounded-3xl border-dashed">
+                              <p className="text-xs text-zinc-500">{language === 'ar' ? 'لا توجد مودات حالياً' : 'No mods available yet'}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Section 2: Most Downloaded (الأكثر تحميلاً) - Blue Bar */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b border-zinc-900/40 pb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-[5px] h-6 rounded-full bg-[#00b4d8] shadow-[0_0_8px_rgba(0,180,216,0.5)]" />
+                              <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                                {language === 'ar' ? 'الأكثر تحميلاً' : 'Most Downloaded'}
+                              </h2>
+                            </div>
+                            <span className="text-xs font-black text-blue-500 bg-blue-500/5 px-3 py-1.5 rounded-xl border border-blue-500/10">
+                              {language === 'ar' ? 'الأعلى طلباً' : 'Top Choice'}
+                            </span>
+                          </div>
+
+                          {mostDownloadedList.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                              {mostDownloadedList.slice(0, 4).map((game) => (
+                                <motion.div
+                                  key={game.id}
+                                  initial={{ opacity: 0, y: 15 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="bg-[#0c0c0e]/95 border border-zinc-900 hover:border-zinc-850 rounded-[2.5rem] p-4 flex flex-col justify-between transition-all duration-300 group relative cursor-pointer shadow-lg hover:shadow-zinc-950/40"
+                                  onClick={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    if (target.closest('button') || target.closest('a')) {
+                                      return;
+                                    }
+                                    setSelectedGameForDetails(game);
+                                  }}
+                                >
+                                  <div className="relative w-full aspect-[4/3] rounded-[2rem] overflow-hidden bg-zinc-950 shrink-0 border border-zinc-900/60 shadow-inner">
+                                    <img 
+                                      src={(game.thumbnail && game.thumbnail !== "") ? game.thumbnail : 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'} 
+                                      alt={game.title} 
+                                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                    {/* Add-On Label */}
+                                    {(game.category === 'مودات' || game.id === 'herschel-backpack' || game.id === 'essentials') && (
+                                      <div className="absolute bottom-3 left-3 bg-black/90 border-2 border-[#caa43c] px-3 py-1 text-[#caa43c] text-[11px] font-black font-mono rounded-lg tracking-wider uppercase shadow-lg select-none">
+                                        Add-On
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex flex-col gap-2 mt-4 text-right">
+                                    <h3 className="text-base sm:text-lg font-black text-white group-hover:text-[#caa43c] transition-colors leading-snug truncate">
+                                      {game.title}
+                                    </h3>
+                                    <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2 min-h-[32px]">
+                                      {game.description}
+                                    </p>
+                                    
+                                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-900/40">
+                                      {/* Dynamic label matching type */}
+                                      {(() => {
+                                        let badgeBg = "bg-red-600";
+                                        let badgeText = language === 'ar' ? 'إضافات' : 'ADD-ONS';
+                                        if (game.category === 'سكنات' || game.category === 'Skins') {
+                                          badgeBg = "bg-[#9d4edd]";
+                                          badgeText = language === 'ar' ? 'سكنات' : 'SKINS';
+                                        } else if (game.category === 'خرائط' || game.category === 'Maps') {
+                                          badgeBg = "bg-orange-650";
+                                          badgeText = language === 'ar' ? 'خرائط' : 'MAPS';
+                                        } else if (game.category === 'شيدرز' || game.category === 'Textures' || game.category === 'Shaders') {
+                                          badgeBg = "bg-red-600";
+                                          badgeText = language === 'ar' ? 'شيدرز' : 'TEXTURES';
+                                        }
+                                        return (
+                                          <span className={`${badgeBg} text-white font-black text-[10px] sm:text-xs px-3 py-1 rounded-xl uppercase tracking-wider shadow-sm`}>
+                                            {badgeText}
+                                          </span>
+                                        );
+                                      })()}
+
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id);
+                                        }}
+                                        className="bg-[#0c0c0e] hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 text-[10px] sm:text-xs font-black px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md"
+                                      >
+                                        <span>
+                                          {(() => {
+                                            const cat = (game.category || '').toLowerCase();
+                                            const isAr = language === 'ar';
+                                            if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                                            if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                                            if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                                            if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                                            return isAr ? 'تنزيل المود' : 'Download Mod';
+                                          })()}
+                                        </span>
+                                        <Download className="w-3.5 h-3.5 stroke-[3px]" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center py-10 bg-zinc-950/50 border border-zinc-900/60 rounded-3xl border-dashed">
+                              <p className="text-xs text-zinc-500">{language === 'ar' ? 'لا توجد إحصاءات حالياً' : 'No stats available yet'}</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Section 3: Latest Skins (أحدث السكنات) - Purple Bar */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between border-b border-zinc-900/40 pb-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-[5px] h-6 rounded-full bg-[#9d4edd] shadow-[0_0_8px_rgba(157,78,221,0.5)]" />
+                              <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                                {language === 'ar' ? 'أحدث السكنات' : 'Latest Skins'}
+                              </h2>
+                            </div>
+                            <span className="text-xs font-black text-purple-500 bg-purple-500/5 px-3 py-1.5 rounded-xl border border-purple-500/10">
+                              {latestSkinsList.length} {language === 'ar' ? 'سكن متوفر' : 'Skins Available'}
+                            </span>
+                          </div>
+
+                          {latestSkinsList.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                              {latestSkinsList.slice(0, 4).map((game) => (
+                                <motion.div
+                                  key={game.id}
+                                  initial={{ opacity: 0, y: 15 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className="bg-[#0c0c0e]/95 border border-zinc-900 hover:border-zinc-850 rounded-[2.5rem] p-4 flex flex-col justify-between transition-all duration-300 group relative cursor-pointer shadow-lg hover:shadow-zinc-950/40"
+                                  onClick={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    if (target.closest('button') || target.closest('a')) {
+                                      return;
+                                    }
+                                    setSelectedGameForDetails(game);
+                                  }}
+                                >
+                                  <div className="relative w-full aspect-[4/3] rounded-[2rem] overflow-hidden bg-zinc-950 shrink-0 border border-zinc-900/60 shadow-inner">
+                                    <img 
+                                      src={(game.thumbnail && game.thumbnail !== "") ? game.thumbnail : 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'} 
+                                      alt={game.title} 
+                                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  </div>
+
+                                  <div className="flex flex-col gap-2 mt-4 text-right">
+                                    <h3 className="text-base sm:text-lg font-black text-white group-hover:text-[#caa43c] transition-colors leading-snug truncate">
+                                      {game.title}
+                                    </h3>
+                                    <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2 min-h-[32px]">
+                                      {game.description}
+                                    </p>
+                                    
+                                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-900/40">
+                                      <span className="bg-[#9d4edd] text-white font-black text-[10px] sm:text-xs px-3 py-1 rounded-xl uppercase tracking-wider shadow-sm">
+                                        {language === 'ar' ? 'سكنات' : 'SKINS'}
+                                      </span>
+
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id);
+                                        }}
+                                        className="bg-[#0c0c0e] hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 text-[10px] sm:text-xs font-black px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md"
+                                      >
+                                        <span>
+                                          {(() => {
+                                            const cat = (game.category || '').toLowerCase();
+                                            const isAr = language === 'ar';
+                                            if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                                            if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                                            if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                                            if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                                            return isAr ? 'تنزيل المود' : 'Download Mod';
+                                          })()}
+                                        </span>
+                                        <Download className="w-3.5 h-3.5 stroke-[3px]" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center py-10 bg-zinc-950/50 border border-zinc-900/60 rounded-3xl border-dashed">
+                              <p className="text-xs text-zinc-500">{language === 'ar' ? 'لا توجد سكنات حالياً' : 'No skins available yet'}</p>
+                            </div>
+                          )}
                         </div>
                       </div>
-                    </div>
+                    ) : (
+                      /* Fallback view: if specific category is selected, we show a clean single category view */
+                      <div className="space-y-6">
+                        <div className="flex flex-col sm:flex-row items-center justify-between border-b border-zinc-900/40 pb-4 gap-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-[5px] h-6 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
+                            <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                              {selectedCategory}
+                            </h2>
+                          </div>
 
-                    <span className="text-xs font-black text-red-400 bg-red-500/10 px-3 py-1.5 rounded-xl border border-red-650/10">
-                      {filteredGames.length} {language === 'ar' ? 'مود متوفر' : 'Mods Available'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Category Filtering Selection Bar */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-4 scrollbar-hide w-full" dir={language === 'ar' ? 'rtl' : 'ltr'}>
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-5 py-2.5 rounded-xl whitespace-nowrap transition-all text-xs font-black select-none shrink-0 ${
-                        selectedCategory === cat 
-                          ? 'bg-red-650 text-white shadow-lg' 
-                          : `${localTheme === 'light' ? 'bg-zinc-100 text-zinc-650 hover:bg-zinc-200' : 'bg-zinc-900 border border-zinc-900 text-zinc-405 hover:bg-zinc-800'}`
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Render Core Game Listings */}
-                {paginatedGames.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <AnimatePresence mode="popLayout">
-                      {paginatedGames.map((game, idx) => {
-                        const tilts = ['rotate-[-1.5deg]', 'rotate-[1.8deg]', 'rotate-[-2deg]', 'rotate-[2.5deg]', 'rotate-[-1deg]', 'rotate-[1.2deg]'];
-                        const tiltAngle = isAsymmetricalMode 
-                          ? tilts[idx % tilts.length]
-                          : '';
-
-                        const getCategoryVibe = (category: string) => {
-                          const norm = category.toUpperCase();
-                          if (norm.includes('MOD') || norm.includes('مود')) {
-                            return {
-                              gradient: 'from-rose-650 to-red-650',
-                              shadowClass: 'shadow-[6px_6px_0px_#dc2626]',
-                              borderClass: 'border-red-600/30 hover:border-red-500',
-                              badgeBg: 'bg-rose-500/10 text-rose-400 border-red-500/25',
-                              btnBg: 'bg-gradient-to-r from-red-650 to-rose-600',
-                              activeColor: 'text-rose-455',
-                            };
-                          }
-                          if (norm.includes('MAP') || norm.includes('خرا') || norm.includes('خرط')) {
-                            return {
-                              gradient: 'from-emerald-500 to-teal-600',
-                              shadowClass: 'shadow-[6px_6px_0px_#10b981]',
-                              borderClass: 'border-emerald-600/30 hover:border-emerald-500',
-                              badgeBg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-                              btnBg: 'bg-gradient-to-r from-emerald-500 to-teal-650',
-                              activeColor: 'text-emerald-400',
-                            };
-                          }
-                          if (norm.includes('SHA') || norm.includes('شيد')) {
-                            return {
-                              gradient: 'from-cyan-500 to-sky-650',
-                              shadowClass: 'shadow-[6px_6px_0px_#06b6d4]',
-                              borderClass: 'border-cyan-600/30 hover:border-cyan-505',
-                              badgeBg: 'bg-cyan-500/10 text-cyan-400 border-cyan-505/20',
-                              btnBg: 'bg-gradient-to-r from-cyan-600 to-sky-600',
-                              activeColor: 'text-cyan-450',
-                            };
-                          }
-                          if (norm.includes('RES') || norm.includes('موا') || norm.includes('مور')) {
-                            return {
-                              gradient: 'from-amber-500 to-orange-600',
-                              shadowClass: 'shadow-[6px_6px_0px_#f59e0b]',
-                              borderClass: 'border-amber-600/30 hover:border-amber-500',
-                              badgeBg: 'bg-amber-500/10 text-amber-405 border-amber-500/20',
-                              btnBg: 'bg-gradient-to-r from-amber-505 to-yellow-500',
-                              activeColor: 'text-amber-400',
-                            };
-                          }
-                          return {
-                            gradient: 'from-fuchsia-500 via-pink-500 to-violet-500',
-                            shadowClass: 'shadow-[6px_6px_0px_#d946ef]',
-                            borderClass: 'border-fuchsia-500/30 hover:border-fuchsia-400',
-                            badgeBg: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
-                            btnBg: 'bg-gradient-to-r from-fuchsia-600 to-pink-500',
-                            activeColor: 'text-fuchsia-400',
-                          };
-                        };
-
-                        const cardVibe = getCategoryVibe(game.category);
-                        
-                        const shapeClass = 'rounded-2xl';
-
-                        const cardCustomStyles = 'bg-zinc-950 border-zinc-900 hover:border-zinc-850 shadow-2xl rounded-2xl';
-                        
-                        return (
-                          <motion.div
-                            key={game.id}
-                            layout
-                            initial={{ opacity: 0, y: 30 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true, margin: "-80px" }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                            whileHover={{ y: -4, transition: { duration: 0.2 } }}
-                            className={`group ${cardCustomStyles} border overflow-hidden relative flex flex-col justify-between`}
-                          >
-                            <div>
-                              <div className="aspect-video relative overflow-hidden bg-zinc-900 border-b border-zinc-900">
-                                <img 
-                                  src={(game.thumbnail && game.thumbnail !== "") ? game.thumbnail : 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'} 
-                                  alt={game.title} 
-                                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                                  referrerPolicy="no-referrer"
-                                />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-80" />
-                                <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-xs font-black text-white border border-zinc-800/60 z-10">
-                                  <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500" />
-                                  {game.rating}
-                                </div>
-                                <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1 rounded-full flex items-center gap-1 text-[10px] font-black text-zinc-300 border border-zinc-800/60 z-10">
-                                  <Download className="w-3.5 h-3.5 text-red-500" />
-                                  <span>{getGameDownloads(game).toLocaleString()}</span>
-                                </div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-bold text-zinc-500">
+                              {language === 'ar' ? 'ترتيب حسب:' : 'Sort By:'}
+                            </span>
+                            <div className="relative inline-block text-left text-zinc-400">
+                              <select
+                                value={sortBy}
+                                onChange={(e) => setSortBy(e.target.value as any)}
+                                className="appearance-none text-xs font-black rounded-xl pl-3 pr-8 py-2 bg-[#0c0c0e] border border-zinc-900 text-white hover:bg-zinc-900 transition-all cursor-pointer"
+                              >
+                                <option value="newest">{language === 'ar' ? 'الأحدث' : 'Newest'}</option>
+                                <option value="highest_rated">{language === 'ar' ? 'الأعلى تقييماً' : 'Highest Rated'}</option>
+                                <option value="most_downloaded">{language === 'ar' ? 'الأكثر تحميلاً' : 'Most Downloaded'}</option>
+                              </select>
+                              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-zinc-500">
+                                <svg className="fill-current h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 11-1.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
+                                </svg>
                               </div>
-                              
-                              <div className="p-5 space-y-3 text-right">
-                                <div className="flex items-center justify-between">
-                                  {game.isPaid ? (
-                                    <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-amber-500 bg-amber-500/10 border-amber-500/20 flex items-center gap-1">
-                                        <Coins className="w-3.5 h-3.5 inline text-amber-500 animate-pulse" />
-                                        {game.price || (language === 'ar' ? 'متميز' : 'Premium')}
-                                      </span>
-                                      <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-emerald-400 bg-emerald-500/10 border-emerald-500/20 flex items-center gap-1">
-                                        {language === 'ar' ? 'الشراء عبر النقط' : 'Buy with points'}
-                                      </span>
+                            </div>
+                            <span className="text-xs font-black text-amber-500 bg-amber-500/5 px-3 py-1.5 rounded-xl border border-amber-500/10">
+                              {filteredGames.length} {language === 'ar' ? 'مود متوفر' : 'Mods Available'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {paginatedGames.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            {paginatedGames.map((game) => (
+                              <motion.div
+                                key={game.id}
+                                initial={{ opacity: 0, y: 15 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="bg-[#0c0c0e]/95 border border-zinc-900 hover:border-zinc-850 rounded-[2.5rem] p-4 flex flex-col justify-between transition-all duration-300 group relative cursor-pointer shadow-lg hover:shadow-zinc-950/40"
+                                onClick={(e) => {
+                                  const target = e.target as HTMLElement;
+                                  if (target.closest('button') || target.closest('a')) {
+                                    return;
+                                  }
+                                  setSelectedGameForDetails(game);
+                                }}
+                              >
+                                <div className="relative w-full aspect-[4/3] rounded-[2rem] overflow-hidden bg-zinc-950 shrink-0 border border-zinc-900/60 shadow-inner">
+                                  <img 
+                                    src={(game.thumbnail && game.thumbnail !== "") ? game.thumbnail : 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'} 
+                                    alt={game.title} 
+                                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                  {/* Add-On Label */}
+                                  {(game.category === 'مودات' || game.id === 'herschel-backpack' || game.id === 'essentials') && (
+                                    <div className="absolute bottom-3 left-3 bg-black/90 border-2 border-[#caa43c] px-3 py-1 text-[#caa43c] text-[11px] font-black font-mono rounded-lg tracking-wider uppercase shadow-lg select-none">
+                                      Add-On
                                     </div>
-                                  ) : (
-                                    <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-lg border text-red-500 bg-red-650/10 border-red-600/10">
-                                      {game.category}
-                                    </span>
                                   )}
-                                  <button 
-                                    onClick={() => toggleFavorite(game.id)}
-                                    className={`p-2 rounded-xl transition-all ${
-                                      userProfile?.favorites?.includes(game.id) 
-                                        ? 'bg-red-650 text-white shadow-lg shadow-red-600/20' 
-                                        : 'bg-zinc-905 text-zinc-500 hover:text-white hover:bg-zinc-800'
-                                    }`}
-                                  >
-                                    <Heart className={`w-4 h-4 ${userProfile?.favorites?.includes(game.id) ? 'fill-current' : ''}`} />
-                                  </button>
                                 </div>
-                                <h3 className="text-lg font-black leading-tight text-white transition-colors uppercase group-hover:text-red-500">{game.title}</h3>
-                                <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2">{game.description}</p>
-                              </div>
-                            </div>
-                            
-                            <div className="p-5 pt-0 flex flex-col gap-2">
-                              {game.isPaid ? (
-                                isGamePurchased(game.id) ? (
-                                  <button 
-                                    onClick={() => triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
-                                    className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-500/20 cursor-pointer shadow-emerald-950/15"
-                                  >
-                                    <Crown className="w-4 h-4 text-white" />
-                                    {language === 'ar' ? 'تحميل المود (مفتوح ✅)' : 'Download Mod (Unlocked ✅)'}
-                                  </button>
-                                ) : (
-                                  <button 
-                                    onClick={() => handleBuyWithPoints(game)}
-                                    className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-555 hover:to-yellow-500 border border-amber-550/20 cursor-pointer shadow-amber-950/15 animate-pulse"
-                                  >
-                                    <Coins className="w-4 h-4 text-white" />
-                                    {language === 'ar' 
-                                      ? `شراء بـ ${game.pointsPrice || calculatePointsPrice(game.price)} نقطة` 
-                                      : `Buy for ${game.pointsPrice || calculatePointsPrice(game.price)} Points`}
-                                  </button>
-                                )
-                              ) : (
-                                <button 
-                                  onClick={() => triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id)}
-                                  className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-red-650 to-amber-600 hover:from-red-600 hover:to-amber-500 border border-red-500/10 cursor-pointer shadow-red-950/20"
-                                >
-                                  <Download className="w-4 h-4 text-white" />
-                                  {language === 'ar' ? 'تحميل المود' : 'Download Mod'}
-                                </button>
-                              )}
-                            </div>
-                          </motion.div>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </div>
-                ) : (
-                  <div className="text-center py-20 bg-zinc-950 border border-zinc-900 rounded-[2rem] border-dashed">
-                    <Gamepad2 className="w-12 h-12 text-zinc-855 mx-auto mb-4" />
-                    <h3 className="text-sm font-black text-zinc-400">لا توجد مذكرات أو مودات تطابق بحثك حالياً</h3>
-                    <p className="text-xs text-zinc-650 mt-1">جرب إدخال كلمات بحث أخرى أو تعديل تصفية الفئات</p>
-                  </div>
-                )}
 
-                {/* Core Pagination Row */}
-                {totalPages > 1 && (
-                  <div className="mt-12 flex items-center justify-center gap-3 bg-zinc-950/20 p-3 rounded-2xl border border-zinc-900/40 w-max mx-auto">
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                      disabled={currentPage === 1}
-                      className="p-3 rounded-xl bg-zinc-950 border border-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition active:scale-95 text-xs font-bold"
-                    >
-                      {language === 'ar' ? 'السابق' : 'Prev'}
-                    </button>
-                    
-                    <div className="flex items-center gap-1.5">
-                      {[...Array(totalPages)].map((_, i) => (
-                        <button
-                          key={i + 1}
-                          onClick={() => setCurrentPage(i + 1)}
-                          className={`w-9 h-9 rounded-xl text-xs font-black transition active:scale-95 ${
-                            currentPage === i + 1 
-                              ? 'bg-red-650 text-white shadow-lg' 
-                              : 'bg-zinc-950 border border-zinc-900 text-zinc-550 hover:text-white'
-                          }`}
-                        >
-                          {i + 1}
-                        </button>
-                      ))}
+                                <div className="flex flex-col gap-2 mt-4 text-right">
+                                  <h3 className="text-base sm:text-lg font-black text-white group-hover:text-amber-400 transition-colors leading-snug truncate">
+                                    {game.title}
+                                  </h3>
+                                  <p className="text-zinc-400 text-xs font-semibold leading-relaxed line-clamp-2 min-h-[32px]">
+                                    {game.description}
+                                  </p>
+                                  
+                                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-zinc-900/40">
+                                    {/* Dynamic Category Badge */}
+                                    {(() => {
+                                      let badgeBg = "bg-red-600";
+                                      let badgeText = language === 'ar' ? 'إضافات' : 'ADD-ONS';
+                                      if (game.category === 'سكنات' || game.category === 'Skins') {
+                                        badgeBg = "bg-[#9d4edd]";
+                                        badgeText = language === 'ar' ? 'سكنات' : 'SKINS';
+                                      } else if (game.category === 'خرائط' || game.category === 'Maps') {
+                                        badgeBg = "bg-orange-650";
+                                        badgeText = language === 'ar' ? 'خرائط' : 'MAPS';
+                                      } else if (game.category === 'شيدرز' || game.category === 'Textures' || game.category === 'Shaders') {
+                                        badgeBg = "bg-red-600";
+                                        badgeText = language === 'ar' ? 'شيدرز' : 'TEXTURES';
+                                      }
+                                      return (
+                                        <span className={`${badgeBg} text-white font-black text-[10px] sm:text-xs px-3 py-1 rounded-xl uppercase tracking-wider shadow-sm`}>
+                                          {badgeText}
+                                        </span>
+                                      );
+                                    })()}
+
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        triggerDownload(game.title, game.downloadUrl, game.description, game.category, game.id);
+                                      }}
+                                      className="bg-[#0c0c0e] hover:bg-zinc-900 text-zinc-300 hover:text-white border border-zinc-800 hover:border-zinc-700 text-[10px] sm:text-xs font-black px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md"
+                                    >
+                                      <span>
+                                        {(() => {
+                                          const cat = (game.category || '').toLowerCase();
+                                          const isAr = language === 'ar';
+                                          if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                                          if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                                          if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                                          if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                                          return isAr ? 'تنزيل المود' : 'Download Mod';
+                                        })()}
+                                      </span>
+                                      <Download className="w-3.5 h-3.5 stroke-[3px]" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-20 bg-zinc-950 border border-zinc-900 rounded-[2rem] border-dashed">
+                            <Gamepad2 className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+                            <h3 className="text-sm font-black text-zinc-400">لا توجد مذكرات أو مودات تطابق بحثك حالياً</h3>
+                            <p className="text-xs text-zinc-500 mt-1">جرب إدخال كلمات بحث أخرى أو تعديل تصفية الفئات</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+
+
+                  {/* 3. ABOUT US SECTION ("معلومات عنا") */}
+                  <div className="space-y-6 text-right pt-4 pb-4">
+                    <div className="flex items-center gap-2.5 border-b border-zinc-900/40 pb-3">
+                      {/* Info SVG Icon */}
+                      <svg className="w-6 h-6 text-[#f59e0b]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                        <span>{language === 'ar' ? 'معلومات عنا' : 'About Us'}</span>
+                      </h2>
                     </div>
 
-                    <button
-                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                      disabled={currentPage === totalPages}
-                      className="p-3 rounded-xl bg-zinc-950 border border-zinc-900 text-white hover:bg-zinc-850 disabled:opacity-50 disabled:cursor-not-allowed transition active:scale-95 text-xs font-bold"
-                    >
-                      {language === 'ar' ? 'التالي' : 'Next'}
-                    </button>
+                    <div className="bg-[#0c0c0e]/90 border border-zinc-900/80 rounded-2xl p-6 sm:p-8">
+                      <p className="text-zinc-300 text-sm sm:text-base font-bold leading-relaxed">
+                        {language === 'ar' 
+                          ? 'Golden هو موقع متخصص في توفير أفضل مودات ماين كرافت بشكل آمن وسهل التحميل. نحن نعمل على تقديم تجربة مميزة لعشاق ماين كرافت.' 
+                          : 'Golden is a premium hub dedicated to providing the best Minecraft mods securely and easily. We strive to offer an amazing experience for all Minecraft lovers.'}
+                      </p>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              {/* 2. Elite Exclusive Sidebar Panel (Column Span 4) */}
-              <div className="lg:col-span-12 xl:col-span-4 space-y-6 text-right">
-                <SidebarSection
-                  language={language}
-                  presetGridMods={PRESET_GRID_MODS}
-                  onDownload={(title, url, description, category) => triggerDownload(title, url, description, category)}
-                />
-              </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1937,7 +3506,7 @@ const AppContent = () => {
               language={language}
               user={user}
               userProfile={userProfile}
-              games={games}
+              games={gamesWithRealRatings}
               toggleFavorite={toggleFavorite}
               setLoginMode={setLoginMode}
               setShowLoginModal={setShowLoginModal}
@@ -2004,7 +3573,7 @@ const AppContent = () => {
                 className="text-5xl md:text-7xl font-black mb-4 leading-tight tracking-tighter flex flex-wrap items-center justify-center lg:justify-start gap-x-4"
               >
                 <span className="bg-clip-text text-transparent bg-gradient-to-r from-amber-200 via-yellow-400 to-amber-600 drop-shadow-[0_0_35px_rgba(245,158,11,0.35)] font-black">
-                  Golden Gih
+                  {generalSettings.siteName || 'Golden Gih'}
                 </span>
               </motion.h1>
 
@@ -2015,9 +3584,9 @@ const AppContent = () => {
                 transition={{ delay: 0.2, duration: 0.6 }}
                 className={`text-zinc-400 text-sm md:text-lg max-w-xl mb-8 leading-relaxed font-black ${language === 'ar' ? 'text-right' : 'text-left'}`}
               >
-                {language === 'ar' 
+                {generalSettings.siteDescription || (language === 'ar' 
                   ? 'منصتك الشاملة لتحميل وتنزيل أفضل إضافات الألعاب والخرائط وسرعات السيرفرات الآمنة بنسبة 100%. ابدأ رحلتك الآن في تصفح مئات المودات المصنفة!' 
-                  : 'Your ultimate destination for lightning-fast mods, customized shaders, and immersive world maps. Completely safe, tested, and updated daily!'}
+                  : 'Your ultimate destination for lightning-fast mods, customized shaders, and immersive world maps. Completely safe, tested, and updated daily!')}
               </motion.p>
 
               {/* Redesigned Search Box */}
@@ -2344,7 +3913,7 @@ const AppContent = () => {
           {/* Bottom copyright line Bar */}
           <div className="pt-4 flex flex-col md:flex-row items-center justify-between gap-4 text-[11px] font-bold text-zinc-500 max-w-3xl mx-auto border-t border-zinc-900/30 font-sans">
             <p>
-              © 2026 Golden Gih. {t.footerRights}
+              © 2026 {generalSettings.siteName || 'Golden Gih'}. {t.footerRights}
             </p>
             <p className="text-zinc-650 font-sans">
               {language === 'ar' ? 'صنع بكل حب لعشاق ماين كرافت العربي Minecraft' : 'Crafted for Minecraft Fans worldwide'}
@@ -2361,7 +3930,7 @@ const AppContent = () => {
         onDeleteGame={handleDeleteGame}
         onResolveReport={handleResolveReport}
         onDeleteReport={handleDeleteReport}
-        games={games}
+        games={displayedGames}
         language={language}
         t={t}
         theme={localTheme}
@@ -2374,13 +3943,14 @@ const AppContent = () => {
         isOpen={showUserPanel} 
         onClose={() => setShowUserPanel(false)}
         profile={userProfile}
-        allGames={games}
+        allGames={displayedGames}
         onUpdateProfile={updateProfile}
         onSendReport={handleSendReport}
         theme={localTheme}
         language={language}
         isAppInstalled={isAppInstalled}
         onInstallPWA={handleInstallPWA}
+        stats={stats}
       />
 
       {/* Contact Modal */}
@@ -2415,6 +3985,339 @@ const AppContent = () => {
         theme={localTheme}
         language={language}
       />
+
+      {/* Game/Mod Details Drawer Overlay */}
+      <AnimatePresence>
+        {selectedGameForDetails && (() => {
+          const averageRating = reviews.length > 0 
+            ? (reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length).toFixed(1)
+            : (selectedGameForDetails.rating || '5.0');
+
+          return (
+            <div className="fixed inset-0 z-[160] flex justify-end font-sans" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+              {/* Backdrop cover */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setSelectedGameForDetails(null)}
+                className="absolute inset-0 bg-black/80 backdrop-blur-sm pointer-events-auto"
+              />
+
+              {/* Sliding Drawer Panel */}
+              <motion.div
+                initial={{ x: language === 'ar' ? '100%' : '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: language === 'ar' ? '100%' : '100%' }}
+                transition={{ type: 'spring', damping: 28, stiffness: 220 }}
+                className="relative w-full max-w-lg h-full bg-[#0c0c0e] border-l border-zinc-900/80 shadow-2xl flex flex-col z-20 overflow-hidden pointer-events-auto text-right"
+              >
+                {/* Header block with close and background */}
+                <div className="relative aspect-video shrink-0 bg-zinc-950 overflow-hidden border-b border-zinc-900">
+                  <img
+                    src={selectedGameForDetails.thumbnail || 'https://images.unsplash.com/photo-1587573089734-09cb69c0f2b4?q=80&w=400&auto=format&fit=crop'}
+                    alt={selectedGameForDetails.title}
+                    className="w-full h-full object-cover animate-fade-in"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0c0c0e] via-transparent to-transparent opacity-95" />
+                  
+                  {/* Floating controls in header absolute */}
+                  <div className="absolute top-4 left-4 right-4 flex items-center justify-between pointer-events-none z-10" dir="ltr">
+                    {/* Floating Edition Tag */}
+                    <span className="bg-amber-500 text-black font-extrabold px-3 py-1 rounded-xl text-[10px] uppercase tracking-wider shadow-lg select-none pointer-events-auto">
+                      {selectedGameForDetails.edition === 'java' ? 'Java 1.20.4' : selectedGameForDetails.edition === 'bedrock' ? 'Bedrock 1.20' : '1.20.4'}
+                    </span>
+
+                    {/* Close button Drawer */}
+                    <button
+                      onClick={() => setSelectedGameForDetails(null)}
+                      className="w-9 h-9 flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-zinc-800 text-zinc-400 hover:text-white pointer-events-auto transition active:scale-95 cursor-pointer"
+                      title={language === 'ar' ? 'إغلاق التفاصيل' : 'Close Details'}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Game title overlapping overlay background */}
+                  <div className="absolute bottom-4 inset-x-5 text-right flex flex-col gap-1 z-10" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                    <span className="text-[10px] font-black text-red-500 uppercase tracking-wider">
+                      {selectedGameForDetails.category}
+                    </span>
+                    <h2 className="text-2xl font-black text-white uppercase tracking-tight">
+                      {selectedGameForDetails.title}
+                    </h2>
+                  </div>
+                </div>
+
+                {/* Scrollable Core Drawer Content */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin">
+                  {/* Statistics panel block */}
+                  <div className="grid grid-cols-3 gap-3 bg-zinc-900/40 p-4 rounded-xl border border-zinc-900/60 text-center">
+                    <div className="flex flex-col items-center justify-center space-y-1">
+                      <div className="flex items-center gap-1.5 text-amber-500 font-black">
+                        <Star className="w-4 h-4 fill-amber-500 text-amber-500" />
+                        <span className="text-sm font-black text-white">{averageRating}</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase">{language === 'ar' ? 'التقييم العام' : 'Rating'}</span>
+                    </div>
+
+                    <div className="h-8 w-[1px] bg-zinc-800 self-center" />
+
+                    <div className="flex flex-col items-center justify-center space-y-1">
+                      <div className="flex items-center gap-1.5 text-zinc-200 font-black">
+                        <Download className="w-4 h-4 text-zinc-400" />
+                        <span className="text-sm font-black text-white">{getGameDownloads(selectedGameForDetails).toLocaleString()}</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase">{language === 'ar' ? 'التنزيلات' : 'Downloads'}</span>
+                    </div>
+
+                    <div className="h-8 w-[1px] bg-zinc-800 self-center" />
+
+                    <div className="flex flex-col items-center justify-center space-y-1">
+                      <div className="flex items-center justify-center gap-1.5 font-black text-emerald-400">
+                        {selectedGameForDetails.isPaid ? (
+                          <>
+                            <Coins className="w-4 h-4 text-amber-500" />
+                            <span className="text-xs text-amber-500 font-black">{selectedGameForDetails.price || (language === 'ar' ? 'متميز' : 'Premium')}</span>
+                          </>
+                        ) : (
+                          <span className="text-xs font-black text-emerald-400">{language === 'ar' ? 'مجاني' : 'Free'}</span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-zinc-500 font-bold uppercase">{language === 'ar' ? 'التكلفة' : 'Price'}</span>
+                    </div>
+                  </div>
+
+                  {/* Summary / Description */}
+                  <div className="space-y-2 text-right">
+                    <h4 className="text-sm font-black text-zinc-400 uppercase tracking-widest">{language === 'ar' ? 'تفاصيل وإرشاد المود' : 'Mod Details & Instructions'}</h4>
+                    <p className="text-xs text-zinc-300 font-semibold leading-relaxed select-text whitespace-pre-line">
+                      {selectedGameForDetails.description}
+                    </p>
+                  </div>
+
+                  {/* Download / Buy CTA Inside Drawer */}
+                  <div className="bg-zinc-900/20 p-4 rounded-2xl border border-zinc-900 flex items-center justify-between gap-4 text-right">
+                    <div className="flex flex-col text-right">
+                      <span className="text-[9px] text-zinc-500 font-black uppercase">{language === 'ar' ? 'حالة الترخيص والموثوقية' : 'License Trust Certificate'}</span>
+                      <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5 mt-0.5">
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        {language === 'ar' ? 'آمن ومفحوص تماماً' : 'Secure and scanning verified'}
+                      </span>
+                    </div>
+
+                    <div>
+                      {selectedGameForDetails.isPaid ? (
+                        isGamePurchased(selectedGameForDetails.id) ? (
+                          <button
+                            onClick={() => triggerDownload(selectedGameForDetails.title, selectedGameForDetails.downloadUrl, selectedGameForDetails.description, selectedGameForDetails.category, selectedGameForDetails.id)}
+                            className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-black px-5 py-3 rounded-xl flex items-center gap-2 transition active:scale-95 shadow-lg shadow-yellow-500/10 cursor-pointer"
+                          >
+                            <span>
+                              {(() => {
+                                const cat = (selectedGameForDetails.category || '').toLowerCase();
+                                const isAr = language === 'ar';
+                                if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                                if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                                if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                                if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                                return isAr ? 'تنزيل المود' : 'Download Mod';
+                              })()}
+                            </span>
+                            <Download className="w-4 h-4 stroke-[3px]" />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleBuyWithPoints(selectedGameForDetails)}
+                            className="bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-550 hover:to-yellow-505 text-white text-xs font-black px-5 py-3 rounded-xl flex items-center gap-2 transition active:scale-95 cursor-pointer shadow-md"
+                          >
+                            <span>
+                              {(() => {
+                                const cat = (selectedGameForDetails.category || '').toLowerCase();
+                                const isAr = language === 'ar';
+                                if (cat === 'سكنات' || cat === 'skins') return isAr ? 'شراء السكن' : 'Buy Skin';
+                                if (cat === 'خرائط' || cat === 'maps') return isAr ? 'شراء الخريطة' : 'Buy Map';
+                                if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'شراء الشيدر' : 'Buy Shader';
+                                if (cat === 'موارد' || cat === 'resources') return isAr ? 'شراء المورد' : 'Buy Resource';
+                                return isAr ? 'شراء المود' : 'Buy Mod';
+                              })()}
+                            </span>
+                            <Coins className="w-4 h-4" />
+                          </button>
+                        )
+                      ) : (
+                        <button
+                          onClick={() => triggerDownload(selectedGameForDetails.title, selectedGameForDetails.downloadUrl, selectedGameForDetails.description, selectedGameForDetails.category, selectedGameForDetails.id)}
+                          className="bg-amber-500 hover:bg-amber-400 text-black text-xs font-black px-5 py-3 rounded-xl flex items-center gap-2 transition active:scale-95 shadow-lg shadow-yellow-500/10 cursor-pointer"
+                        >
+                          <span>
+                            {(() => {
+                              const cat = (selectedGameForDetails.category || '').toLowerCase();
+                              const isAr = language === 'ar';
+                              if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                              if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                              if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                              if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                              return isAr ? 'تنزيل المود' : 'Download Mod';
+                            })()}
+                          </span>
+                          <Download className="w-4 h-4 stroke-[3px]" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="h-[1px] bg-zinc-900" />
+
+                  {/* Write a Review Block */}
+                  <div className="space-y-4 bg-zinc-900/20 p-5 rounded-2xl border border-zinc-900 text-right">
+                    <div className="flex items-center gap-2 justify-end">
+                      <h4 className="text-sm font-black text-white">{language === 'ar' ? 'إضافة تقييم ومراجعة' : 'Add Your Review & Feedback'}</h4>
+                      <MessageSquare className="w-4 h-4 text-amber-500" />
+                    </div>
+
+                    <form onSubmit={handlePostReview} className="space-y-3.5">
+                      {/* Username row */}
+                      {!userProfile && (
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-zinc-500 font-bold uppercase">{language === 'ar' ? 'الاسم المستعار (لاعب زائر)' : 'Nickname (Guest Player)'}</label>
+                          <input
+                            type="text"
+                            value={guestName}
+                            onChange={(e) => setGuestName(e.target.value)}
+                            placeholder={language === 'ar' ? 'مثال: ستيف الخارق' : 'e.g. Steve Gamer'}
+                            className="w-full bg-zinc-950 border border-zinc-900 hover:border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-zinc-650 focus:border-amber-500/50 outline-none transition text-right"
+                          />
+                        </div>
+                      )}
+
+                      {/* Stars picker row */}
+                      <div className="space-y-1 text-right">
+                        <label className="text-[10px] text-zinc-500 font-bold uppercase block">{language === 'ar' ? 'عدد النجوم' : 'Stars Rating'}</label>
+                        <div className="flex items-center justify-end gap-1" dir="ltr">
+                          {[1, 2, 3, 4, 5].map((num) => (
+                            <button
+                              key={num}
+                              type="button"
+                              onClick={() => setNewRating(num)}
+                              className="p-1 cursor-pointer transition transform hover:scale-125 focus:outline-none"
+                              title={`${num} Stars`}
+                            >
+                              <Star
+                                className={`w-5 h-5 transition-all duration-150 ${
+                                  num <= newRating 
+                                    ? 'text-yellow-500 fill-yellow-500 scale-110 drop-shadow-[0_0_3px_rgba(245,158,11,0.45)]' 
+                                    : 'text-zinc-700 hover:text-zinc-500'
+                                }`}
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Comment text area */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-zinc-500 font-bold uppercase">{language === 'ar' ? 'التعليق والمراجعة' : 'Review Comment'}</label>
+                        <textarea
+                          value={newComment}
+                          onChange={(e) => setNewComment(e.target.value)}
+                          placeholder={language === 'ar' ? 'اكتب انطباعك بوضوح وملاحظاتك عن المود...' : 'Type your detailed impressions about mod performance...'}
+                          className="w-full h-24 bg-zinc-950 border border-zinc-900 hover:border-zinc-800 rounded-xl p-4 text-xs text-white placeholder-zinc-600 focus:border-amber-500/50 outline-none transition resize-none text-right"
+                        />
+                      </div>
+
+                      {/* Submit button inside form */}
+                      <button
+                        type="submit"
+                        disabled={isSubmittingReview}
+                        className="w-full bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-white hover:text-amber-500 text-xs font-black px-4 py-3 rounded-xl flex items-center justify-center gap-2 transition active:scale-95 disabled:opacity-50 cursor-pointer shadow-md"
+                      >
+                        {isSubmittingReview ? (
+                          <div className="w-3.5 h-3.5 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>{language === 'ar' ? 'إرسال التقييم رسمياً' : 'Submit My Review'}</span>
+                          </>
+                        )}
+                      </button>
+                    </form>
+                  </div>
+
+                  <div className="h-[1px] bg-zinc-900" />
+
+                  {/* Reviews List block */}
+                  <div className="space-y-4 text-right animate-pulse-subtle">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-zinc-500 bg-zinc-900 px-2.5 py-1 rounded-lg border border-zinc-900 font-black">
+                        {reviews.length} {language === 'ar' ? 'تقييمات مضافة' : 'Reviews posted'}
+                      </span>
+                      <h4 className="text-sm font-black text-white">{language === 'ar' ? 'آراء ومراجعات كرافت السابقة' : 'Past Player Reviews'}</h4>
+                    </div>
+
+                    {reviewsLoading ? (
+                      <div className="py-8 text-center text-xs text-zinc-500 font-bold flex flex-col items-center gap-2">
+                        <div className="w-5 h-5 border-2 border-t-transparent border-amber-500 rounded-full animate-spin" />
+                        <span>{language === 'ar' ? 'جاري تحميل التقييمات في الوقت الفعلي...' : 'Loading secure live comments...'}</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-3.5 text-right">
+                        {reviews.length === 0 ? (
+                          <div className="p-6 rounded-xl bg-[#09090b] border border-zinc-900 text-center text-zinc-500 text-xs font-bold py-8">
+                            {language === 'ar' 
+                              ? 'لا توجد مراجعات أو تعليقات مضافة بعد لهذا المود. كن أول من يكتب تعليقاً حقيقياً! ✍️' 
+                              : 'No reviews or comments posted yet for this mod. Be the first to post an authentic review! ✍️'}
+                          </div>
+                        ) : (
+                          reviews.map((rev) => (
+                            <div key={rev.id} className="p-4 rounded-xl bg-[#09090b] border border-zinc-900 text-right space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[9px] text-zinc-600 font-sans">
+                                  {rev.createdAt ? new Date(rev.createdAt).toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    year: 'numeric'
+                                  }) : ''}
+                                </span>
+
+                                <div className="flex items-center gap-2.5">
+                                  <div className="flex flex-col text-right">
+                                    <span className="text-xs font-black text-zinc-200">{rev.userName}</span>
+                                    <div className="flex items-center justify-end gap-0.5">
+                                      {[...Array(5)].map((_, s) => (
+                                        <Star
+                                          key={s}
+                                          className={`w-2.5 h-2.5 ${s < rev.rating ? 'text-yellow-500 fill-yellow-500' : 'text-zinc-800'}`}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div className="w-8 h-8 rounded-full border border-zinc-800 bg-zinc-900/60 flex items-center justify-center font-bold text-amber-500 text-[10px] shrink-0 uppercase">
+                                    {rev.userPhoto ? (
+                                      <img src={rev.userPhoto} alt="" className="w-full h-full object-cover rounded-full" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      rev.userName?.slice(0, 2) || 'GP'
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <p className="text-zinc-400 text-xs font-semibold leading-relaxed whitespace-pre-line pl-10 pr-1">
+                                {rev.comment}
+                              </p>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
 
       {/* Points Notification Modal */}
       <AnimatePresence>
@@ -2585,33 +4488,42 @@ const AppContent = () => {
                   ) : (
                     <div className="space-y-4 text-right" dir={language === 'ar' ? 'rtl' : 'ltr'}>
                       {/* Avatar presentation & Rank information */}
-                      <div className="flex items-center gap-3 bg-zinc-950/30 p-2.5 rounded-xl border border-zinc-800/10">
-                        <div className="relative shrink-0">
-                          <img 
-                            src={userProfile?.photoURL && userProfile.photoURL !== "" ? userProfile.photoURL : "https://mc-heads.net/avatar/MHF_Steve/64"} 
-                            alt="" 
-                            className="w-12 h-12 rounded-xl object-cover border-2 border-red-550/20 shadow-md"
-                          />
-                          {userProfile?.email === 'frassa0000@gmail.com' && (
-                            <div className="absolute -bottom-1 -right-1 bg-amber-500 text-white p-1 rounded-full shadow border border-zinc-950">
-                              <Crown className="w-3 h-3 fill-current" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="leading-tight text-right flex-1 min-w-0">
-                          <p className="font-extrabold text-xs text-white truncate">
-                            {userProfile?.displayName || userProfile?.email?.split('@')[0] || 'لاعب غولدين'}
-                          </p>
-                          <div className="flex gap-1.5 mt-1 items-center">
-                            {userProfile?.email === 'frassa0000@gmail.com' ? (
-                              <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-black">المدير</span>
-                            ) : userProfile?.verified ? (
-                              <span className="text-[9px] bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full font-black">عضو موثق</span>
-                            ) : (
-                              <span className="text-[9px] bg-zinc-805 text-zinc-400 border border-zinc-700 px-2 py-0.5 rounded-full font-black">عضو جديد</span>
+                      <div className="flex flex-col gap-2.5 bg-zinc-950/30 p-2.5 rounded-xl border border-zinc-800/10">
+                        <div className="flex items-center gap-3">
+                          <div className="relative shrink-0">
+                            <img 
+                              src={userProfile?.photoURL && userProfile.photoURL !== "" ? userProfile.photoURL : "https://mc-heads.net/avatar/MHF_Steve/64"} 
+                              alt="" 
+                              className="w-12 h-12 rounded-xl object-cover border-2 border-red-550/20 shadow-md"
+                            />
+                            {userProfile?.email === 'frassa0000@gmail.com' && (
+                              <div className="absolute -bottom-1 -right-1 bg-amber-500 text-white p-1 rounded-full shadow border border-zinc-950">
+                                <Crown className="w-3 h-3 fill-current" />
+                              </div>
                             )}
                           </div>
+                          <div className="leading-tight text-right flex-1 min-w-0">
+                            <p className="font-extrabold text-xs text-white truncate">
+                              {userProfile?.displayName || userProfile?.email?.split('@')[0] || 'لاعب غولدين'}
+                            </p>
+                            <div className="flex gap-1.5 mt-1 items-center">
+                              {userProfile?.email === 'frassa0000@gmail.com' ? (
+                                <span className="text-[9px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded-full font-black">المدير</span>
+                              ) : userProfile?.verified ? (
+                                <span className="text-[9px] bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2 py-0.5 rounded-full font-black">عضو موثق</span>
+                              ) : (
+                                <span className="text-[9px] bg-zinc-805 text-zinc-400 border border-zinc-700 px-2 py-0.5 rounded-full font-black">عضو جديد</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
+                        {userProfile?.bio && (
+                          <div className="border-t border-zinc-900/40 pt-1.5 text-right w-full">
+                            <p className="text-[10px] text-zinc-400 leading-relaxed font-semibold pr-1 break-words">
+                              {userProfile.bio}
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       {/* Display name field edit */}
@@ -2644,6 +4556,42 @@ const AppContent = () => {
                           >
                             {isSavingDrawerProfile ? (language === 'ar' ? '...' : '...') : (language === 'ar' ? 'حفظ' : 'Save')}
                           </button>
+                        </div>
+                      </div>
+
+                      {/* Bio field edit */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] text-zinc-500 font-black mr-1 uppercase">الوصف الشخصي (Bio)</label>
+                        <div className="flex flex-col gap-2">
+                          <textarea 
+                            value={drawerBio}
+                            onChange={(e) => setDrawerBio(e.target.value)}
+                            placeholder={language === 'ar' ? 'اكتب نبذة قصيرة عن نفسك لتظهر لغيرك من اللاعبين...' : 'Write a short description to represent yourself to other players...'}
+                            maxLength={150}
+                            rows={2}
+                            className={`w-full bg-zinc-950 border ${localTheme === 'light' ? 'border-zinc-200 text-black' : 'border-zinc-800 text-white'} rounded-xl p-2.5 text-xs focus:border-red-650 outline-none transition-colors font-semibold resize-none ${language === 'ar' ? 'text-right' : 'text-left'}`}
+                          />
+                          <div className="flex justify-between items-center">
+                            <span className="text-[9px] text-zinc-500 font-bold">{drawerBio.length}/150</span>
+                            <button 
+                              onClick={async () => {
+                                setIsSavingDrawerProfile(true);
+                                try {
+                                  await updateProfile({ bio: drawerBio.trim() });
+                                  setDrawerSaveSuccess(true);
+                                  setTimeout(() => setDrawerSaveSuccess(false), 3000);
+                                } catch (err) {
+                                  console.error(err);
+                                } finally {
+                                  setIsSavingDrawerProfile(false);
+                                }
+                              }}
+                              disabled={isSavingDrawerProfile}
+                              className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-xl text-[10px] font-black transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
+                            >
+                              {isSavingDrawerProfile ? (language === 'ar' ? 'انتقال...' : '...') : (language === 'ar' ? 'تحديث الوصف' : 'Update Bio')}
+                            </button>
+                          </div>
                         </div>
                       </div>
 
@@ -2726,6 +4674,39 @@ const AppContent = () => {
                             />
                           </label>
                         </div>
+
+                        {/* Direct image link URL input field */}
+                        <div className="space-y-1.5 mt-2 bg-zinc-950/20 p-2 rounded-xl border border-zinc-900/40">
+                          <label className="text-[10px] text-zinc-500 font-black mr-1 uppercase">رابط صورة ميزانية مخصص (Direct Image URL)</label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="text" 
+                              value={drawerCustomPhotoUrl}
+                              onChange={(e) => setDrawerCustomPhotoUrl(e.target.value)}
+                              placeholder={language === 'ar' ? 'ضع رابط الصورة المباشر هنا...' : 'Paste custom image URL here...'}
+                              className={`flex-1 bg-zinc-950 border ${localTheme === 'light' ? 'border-zinc-200 text-black' : 'border-zinc-800 text-white'} rounded-xl p-2.5 text-[11px] focus:border-red-650 outline-none transition-colors font-semibold ${language === 'ar' ? 'text-right' : 'text-left'}`}
+                            />
+                            <button 
+                              onClick={async () => {
+                                if (!drawerCustomPhotoUrl.trim()) return;
+                                setIsSavingDrawerProfile(true);
+                                try {
+                                  await updateProfile({ photoURL: drawerCustomPhotoUrl.trim() });
+                                  setDrawerSaveSuccess(true);
+                                  setTimeout(() => setDrawerSaveSuccess(false), 3000);
+                                } catch (err) {
+                                  console.error(err);
+                                } finally {
+                                  setIsSavingDrawerProfile(false);
+                                }
+                              }}
+                              disabled={isSavingDrawerProfile}
+                              className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-black transition-all active:scale-95 disabled:opacity-50 shrink-0 cursor-pointer"
+                            >
+                              {language === 'ar' ? 'حفظ الرابط' : 'Apply Link'}
+                            </button>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Success Feedback overlay indicator */}
@@ -2751,6 +4732,8 @@ const AppContent = () => {
                     { label: t.home, icon: LayoutDashboard, action: () => { setActiveMainTab('home'); setActiveSubTab('home'); } },
                     { label: t.trending, icon: Flame, action: () => { setActiveMainTab('home'); setActiveSubTab('trending'); } },
                     { label: t.new, icon: Star, action: () => { setActiveMainTab('home'); setActiveSubTab('for-you'); } },
+                    { label: language === 'ar' ? 'البحث عن المودات' : 'Search Mods', icon: Search, action: () => { setActiveMainTab('search'); } },
+                    { label: language === 'ar' ? 'المفضلات والقلوب' : 'My Favorites', icon: Heart, action: () => { setActiveMainTab('favorites'); } },
                   ].map((item, i) => (
                     <button 
                       key={i}
@@ -2883,7 +4866,7 @@ const AppContent = () => {
                   <span>{language === 'ar' ? 'اتصل بفرق الدعم الفني' : 'Contact Support Hub'}</span>
                 </button>
                 <div className="text-center py-1">
-                  <p className="text-[10px] text-zinc-650 uppercase tracking-widest font-black">Golden Gih &copy; 2026</p>
+                  <p className="text-[10px] text-zinc-650 uppercase tracking-widest font-black">{generalSettings.siteName || 'Golden Gih'} &copy; 2026</p>
                 </div>
               </div>
             </motion.div>
@@ -2906,10 +4889,35 @@ const AppContent = () => {
               <div className="absolute top-0 left-0 w-32 h-32 bg-red-650/10 rounded-full blur-3xl pointer-events-none animate-pulse" />
 
               <div className="flex gap-4 items-start mb-4">
-                {/* Crimson circle loader/indicator */}
-                <div className="w-12 h-12 rounded-2xl bg-red-650/10 border border-red-500/25 shrink-0 flex items-center justify-center text-red-500 relative">
+                {/* Premium circular progress SVG wheel indicator */}
+                <div className="w-12 h-12 rounded-2xl bg-zinc-900/60 border border-zinc-800/80 shrink-0 flex items-center justify-center text-red-500 relative select-none">
                   {activeDownload.progress < 100 ? (
-                    <div className="w-6 h-6 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+                    <>
+                      <svg className="w-10 h-10 transform -rotate-90">
+                        <circle
+                          cx="20"
+                          cy="20"
+                          r="15"
+                          className="stroke-zinc-800"
+                          strokeWidth="2"
+                          fill="transparent"
+                        />
+                        <motion.circle
+                          cx="20"
+                          cy="20"
+                          r="15"
+                          className="stroke-red-500 drop-shadow-[0_0_4px_rgba(239,68,68,0.5)]"
+                          strokeWidth="2.5"
+                          fill="transparent"
+                          strokeDasharray={2 * Math.PI * 15}
+                          animate={{ strokeDashoffset: (2 * Math.PI * 15) - (activeDownload.progress / 100) * (2 * Math.PI * 15) }}
+                          transition={{ ease: "easeOut", duration: 0.1 }}
+                        />
+                      </svg>
+                      <span className="absolute text-[9px] font-mono font-black text-red-500">
+                        {activeDownload.progress}%
+                      </span>
+                    </>
                   ) : (
                     <ShieldCheck className="w-6 h-6 text-amber-500 animate-bounce" />
                   )}
@@ -3096,7 +5104,9 @@ const AppContent = () => {
                   <Gamepad2 className="w-8 h-8 text-white" />
                 </div>
                 
-                <h2 className="text-2xl font-black text-center mb-1 tracking-tighter">مرحباً بك في Golden Gih</h2>
+                <h2 className="text-2xl font-black text-center mb-1 tracking-tighter">
+                  {language === 'ar' ? `مرحباً بك في ${generalSettings.siteName || 'Golden Gih'}` : `Welcome to ${generalSettings.siteName || 'Golden Gih'}`}
+                </h2>
                 <p className="text-zinc-500 text-center mb-6 text-xs font-bold">يرجى تسجيل الدخول أو إنشاء حساب جديد للمتابعة</p>
 
                 {/* Minecraft Edition Selector */}
@@ -3411,7 +5421,8 @@ const AdminPanel = ({
   user: User | null;
   userProfile: UserProfileData | null;
 }) => {
-  const [activeTab, setActiveTab] = useState<'games' | 'reports' | 'users' | 'socials'>('games');
+  const [activeTab, setActiveTab] = useState<string>('settings-general');
+  const [settingsExpanded, setSettingsExpanded] = useState<boolean>(true);
   const [reports, setReports] = useState<Report[]>([]);
   const [reportReplies, setReportReplies] = useState<{[reportId: string]: string}>({});
   const [dbUsers, setDbUsers] = useState<any[]>([]);
@@ -3425,22 +5436,62 @@ const AdminPanel = ({
     twitter: ''
   });
   const [socialsLoading, setSocialsLoading] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+
+  const [generalSettings, setGeneralSettings] = useState({
+    siteName: 'جولدن',
+    siteDescription: 'جولدن - محتوى ماين كرافت عربي مميز لأخبار، شروحات، مودات و كل ما يخص عالم ماين كرافت!',
+    siteLogo: '',
+    siteUrl: 'https://golden-mc.com',
+    adminEmail: 'admin@golden-mc.com',
+    timezone: 'القاهرة (UTC+02:00)',
+    siteLanguage: 'العربية',
+    maintenanceMode: false,
+    youtube: 'https://youtube.com/@GoldenMC',
+    discord: 'https://discord.gg/golden',
+    twitter: 'https://twitter.com/GoldenMC'
+  });
 
   useEffect(() => {
     if (isOpen) {
+      setSettingsLoading(true);
       const settingsRef = doc(db, 'settings', 'socials');
       getDoc(settingsRef).then((snap) => {
         if (snap.exists()) {
-          setAdminSocials(snap.data() as any);
+          const data = snap.data();
+          setAdminSocials(data as any);
+          setGeneralSettings(prev => ({
+            ...prev,
+            youtube: data.youtube || prev.youtube,
+            discord: data.discord || prev.discord,
+            twitter: data.twitter || prev.twitter,
+          }));
         }
       }).catch(err => console.error("Error fetching socials config:", err));
+
+      const generalRef = doc(db, 'settings', 'general');
+      getDoc(generalRef).then((snap) => {
+        if (snap.exists()) {
+          setGeneralSettings(prev => ({
+            ...prev,
+            ...snap.data()
+          }));
+        }
+      }).catch(err => console.error("Error fetching general config:", err))
+        .finally(() => setSettingsLoading(false));
     }
   }, [isOpen]);
 
   const handleSaveSocials = async () => {
     setSocialsLoading(true);
     try {
-      await setDoc(doc(db, 'settings', 'socials'), adminSocials);
+      await setDoc(doc(db, 'settings', 'socials'), {
+        youtube: generalSettings.youtube,
+        discord: generalSettings.discord,
+        twitter: generalSettings.twitter,
+        tiktok: adminSocials.tiktok || '',
+        telegram: adminSocials.telegram || ''
+      });
       alert(language === 'ar' ? 'تم حفظ روابط شبكات التواصل بنجاح!' : 'Social links saved successfully!');
     } catch (err) {
       console.error("Save socials error:", err);
@@ -3448,6 +5499,45 @@ const AdminPanel = ({
     } finally {
       setSocialsLoading(false);
     }
+  };
+
+  const handleSaveGeneralSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      await setDoc(doc(db, 'settings', 'general'), generalSettings);
+      
+      // Also sync socials to socials collection
+      await setDoc(doc(db, 'settings', 'socials'), {
+        youtube: generalSettings.youtube,
+        discord: generalSettings.discord,
+        twitter: generalSettings.twitter,
+        tiktok: adminSocials.tiktok || '',
+        telegram: adminSocials.telegram || ''
+      });
+
+      alert(language === 'ar' ? 'تم حفظ الإعدادات بنجاح!' : 'Settings saved successfully!');
+    } catch (err) {
+      console.error("Save general settings error:", err);
+      alert(language === 'ar' ? 'حدث خطأ أثناء حفظ الإعدادات.' : 'Failed saving general settings.');
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const handleLogoUpload = () => {
+    const newLogo = prompt(
+      language === 'ar' 
+        ? 'أدخل رابط الصورة لشعار الموقع الجديد:' 
+        : 'Enter image URL for the new site logo:', 
+      generalSettings.siteLogo || 'https://golden-mc.com/logo.png'
+    );
+    if (newLogo !== null) {
+      setGeneralSettings(prev => ({ ...prev, siteLogo: newLogo }));
+    }
+  };
+
+  const handleLogoDelete = () => {
+    setGeneralSettings(prev => ({ ...prev, siteLogo: '' }));
   };
 
   useEffect(() => {
@@ -3817,8 +5907,8 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
             onClick={() => setActiveTab('socials')}
             className={`flex-1 flex flex-col items-center gap-1 py-3 transition-all ${activeTab === 'socials' ? 'text-red-500 border-b-2 border-red-500' : 'text-zinc-500'}`}
           >
-            <LinkIcon className="w-5 h-5" />
-            <span className="text-[10px] font-bold">التواصل</span>
+            <Settings className="w-5 h-5" />
+            <span className="text-[10px] font-bold">الإعدادات</span>
           </button>
         </div>
 
@@ -3855,8 +5945,8 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
               onClick={() => setActiveTab('socials')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeTab === 'socials' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : `text-zinc-500 ${theme === 'light' ? 'hover:bg-zinc-200' : 'hover:bg-zinc-900'}`}`}
             >
-              <LinkIcon className="w-5 h-5" />
-              روابط التواصل الاجتماعي
+              <Settings className="w-5 h-5" />
+              الإعدادات العامة
             </button>
           </div>
 
@@ -4505,11 +6595,6 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
                                   عضو موثق
                                 </span>
                               )}
-                              {!isTargetAdmin && !targetUser.verified && (
-                                <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 px-2.5 py-0.5 rounded-full font-black">
-                                  عضو جديد
-                                </span>
-                              )}
                             </div>
                             <span className="text-xs text-zinc-500 block mt-1">{targetUser.email}</span>
                           </div>
@@ -4526,6 +6611,7 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
                           ) : (
                             <button 
                               disabled={toggleLoading === targetUser.id}
+                              type="button"
                               onClick={() => handleToggleVerification(targetUser.id, targetUser.verified)}
                               className={`text-[11px] font-bold px-4 py-2 rounded-xl border transition-all ${
                                 targetUser.verified 
@@ -4557,83 +6643,235 @@ Provide useful, detailed and friendly guidelines. Always conclude with a final s
                 </div>
               </div>
             ) : activeTab === 'socials' ? (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-xl font-bold flex items-center gap-2">
-                    <LinkIcon className="w-5 h-5 text-red-500" />
-                    {language === 'ar' ? 'إعدادات شبكات التواصل الاجتماعي' : 'Social Media Channel Links'}
-                  </h3>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    {language === 'ar' 
-                      ? 'حدد روابط حسابات المنصة الرسمية ليتم تفعيل الأزرار والمتابعة في أسفل الموقع.'
-                      : 'Define active communication endpoints that drive visual links on the public landing page.'}
-                  </p>
+              <div className="space-y-6 text-right" dir="rtl">
+                {/* Header */}
+                <div className="mb-8">
+                  <h2 className="text-2xl font-black text-white tracking-tight font-sans">الإعدادات العامة</h2>
+                  <p className="text-zinc-500 text-xs mt-1 font-semibold">إدارة إعدادات موقع جولدن</p>
                 </div>
 
-                <div className="space-y-4 bg-[#09090b] p-6 rounded-[2rem] border border-zinc-800 text-right" dir="rtl">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط التيك توك (TikTok)</label>
-                    <input 
-                      type="text"
-                      placeholder="https://tiktok.com/@youraccount"
-                      value={adminSocials.tiktok || ''}
-                      onChange={(e) => setAdminSocials(prev => ({ ...prev, tiktok: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
-                      dir="ltr"
-                    />
+                {/* Card 1: هوية الموقع */}
+                <div className="bg-[#0c0d10] border border-zinc-900 rounded-3xl p-6 md:p-8 space-y-6">
+                  <div className="flex items-center justify-between border-b border-zinc-900/60 pb-3">
+                    <span className="text-sm font-black text-amber-500">هوية الموقع</span>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط قناة التلغرام (Telegram)</label>
-                    <input 
-                      type="text"
-                      placeholder="https://t.me/yourchannel"
-                      value={adminSocials.telegram || ''}
-                      onChange={(e) => setAdminSocials(prev => ({ ...prev, telegram: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-600 outline-none transition-colors text-left"
-                      dir="ltr"
-                    />
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">اسم الموقع</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.siteName}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, siteName: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-bold text-zinc-100 focus:border-amber-500 outline-none transition-colors text-right"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط سيرفر الديسكورد (Discord)</label>
-                    <input 
-                      type="text"
-                      placeholder="https://discord.gg/yourinvite"
-                      value={adminSocials.discord || ''}
-                      onChange={(e) => setAdminSocials(prev => ({ ...prev, discord: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-650 outline-none transition-colors text-left"
-                      dir="ltr"
-                    />
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+                    <div className="md:col-span-1 text-right pt-2">
+                      <label className="text-xs font-bold text-zinc-400">وصف الموقع</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <textarea 
+                        rows={3}
+                        value={generalSettings.siteDescription}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, siteDescription: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-medium leading-relaxed text-zinc-100 focus:border-amber-500 outline-none transition-colors text-right resize-none"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط قناة اليوتيوب (YouTube)</label>
-                    <input 
-                      type="text"
-                      placeholder="https://youtube.com/@yourchannel"
-                      value={adminSocials.youtube || ''}
-                      onChange={(e) => setAdminSocials(prev => ({ ...prev, youtube: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-655 outline-none transition-colors text-left"
-                      dir="ltr"
-                    />
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">شعار الموقع</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border border-dashed border-zinc-900 bg-zinc-950/20 p-5 rounded-2xl max-w-xl">
+                        <div className="flex items-center gap-2">
+                          <button 
+                            type="button"
+                            onClick={handleLogoUpload}
+                            className="bg-amber-500 hover:bg-amber-400 text-black font-black text-xs px-5 py-2.5 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer"
+                          >
+                            تغيير الشعار
+                          </button>
+                          <button 
+                            type="button"
+                            onClick={handleLogoDelete}
+                            className="border border-red-500/20 hover:border-red-500 text-red-500 hover:bg-red-500/5 font-bold text-xs px-5 py-2.5 rounded-xl transition-all active:scale-95 cursor-pointer"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                        
+                        <div className="flex items-center gap-3 bg-[#0d0e11] px-5 py-3 rounded-2xl border border-zinc-900 shadow-inner select-none">
+                          <span className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-250 to-amber-500">جولدن</span>
+                          <svg className="w-8 h-8 shrink-0" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M50 20 L85 37 L50 54 L15 37 Z" fill="#5c8e32" stroke="#3c5f21" strokeWidth="1.5" />
+                            <path d="M15 37 L50 54 L50 82 L15 65 Z" fill="#866043" stroke="#5d432e" strokeWidth="1.5" />
+                            <path d="M15 37 L50 54 L50 62 L32.5 53.5 L24 51 L15 42.5 Z" fill="#4d7729" />
+                            <path d="M50 54 L85 37 L85 65 L50 82 Z" fill="#573e2b" stroke="#3b2a1d" strokeWidth="1.5" />
+                            <path d="M50 54 L85 37 L85 45.5 L74.5 50.5 L67 52.5 L50 62 Z" fill="#426623" />
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 mb-2 text-right">رابط منصة إكس (Twitter/X)</label>
-                    <input 
-                      type="text"
-                      placeholder="https://x.com/yourhandle"
-                      value={adminSocials.twitter || ''}
-                      onChange={(e) => setAdminSocials(prev => ({ ...prev, twitter: e.target.value }))}
-                      className="w-full bg-zinc-950 border border-zinc-900 rounded-xl py-3 px-4 text-xs font-mono text-zinc-100 focus:border-red-655 outline-none transition-colors text-left"
-                      dir="ltr"
-                    />
+                </div>
+
+                {/* Card 2: إعدادات عامة */}
+                <div className="bg-[#0c0d10] border border-zinc-900 rounded-3xl p-6 md:p-8 space-y-6">
+                  <div className="flex items-center justify-between border-b border-zinc-900/60 pb-3">
+                    <span className="text-sm font-black text-amber-500">إعدادات عامة</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">رابط الموقع</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.siteUrl}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, siteUrl: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none font-mono transition-colors text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">البريد الإلكتروني للمشرف</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="email"
+                        value={generalSettings.adminEmail}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, adminEmail: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none transition-colors text-right"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">المنطقة الزمنية</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.timezone}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, timezone: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none transition-colors text-right"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">لغة الموقع الافتراضية</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.siteLanguage}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, siteLanguage: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none transition-colors text-right"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">وضع الصيانة</label>
+                    </div>
+                    <div className="md:col-span-3 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setGeneralSettings(prev => ({ ...prev, maintenanceMode: !prev.maintenanceMode }))}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out outline-none ${generalSettings.maintenanceMode ? 'bg-amber-500' : 'bg-zinc-800'}`}
+                      >
+                        <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-black shadow ring-0 transition duration-200 ease-in-out ${generalSettings.maintenanceMode ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                      <span className="text-xs text-zinc-500">تفعيل وضع الصيانة يمنع الزوار غير المشرفين من تصفح الموقع</span>
+                    </div>
                   </div>
 
                   <div className="pt-4 flex justify-end">
                     <button 
+                      type="button"
+                      onClick={handleSaveGeneralSettings}
+                      disabled={settingsLoading}
+                      className="bg-amber-500 hover:bg-amber-400 text-black font-black text-xs px-6 py-3 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer disabled:opacity-50"
+                    >
+                      {settingsLoading ? 'جاري الحفظ...' : 'حفظ الإعدادات العامة'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card 3: روابط شبكات التواصل */}
+                <div className="bg-[#0c0d10] border border-zinc-900 rounded-3xl p-6 md:p-8 space-y-6">
+                  <div className="flex items-center justify-between border-b border-zinc-900/60 pb-3">
+                    <span className="text-sm font-black text-amber-500">روابط قنوات ومواقع التواصل</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">قناة اليوتيوب</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.youtube}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, youtube: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none font-mono transition-colors text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">سيرفر الديسكورد</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.discord}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, discord: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none font-mono transition-colors text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-1 text-right">
+                      <label className="text-xs font-bold text-zinc-400">حساب تويتر (X)</label>
+                    </div>
+                    <div className="md:col-span-3">
+                      <input 
+                        type="text"
+                        value={generalSettings.twitter}
+                        onChange={e => setGeneralSettings(prev => ({ ...prev, twitter: e.target.value }))}
+                        className="w-full bg-[#090b0d] border border-zinc-900 rounded-xl py-3 px-4 text-xs font-semibold text-zinc-100 focus:border-amber-500 outline-none font-mono transition-colors text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 flex justify-end">
+                    <button 
+                      type="button"
                       onClick={handleSaveSocials}
                       disabled={socialsLoading}
-                      className="w-full max-w-xs bg-gradient-to-r from-red-650 to-amber-500 hover:from-red-550 hover:to-amber-400 text-white font-black text-xs py-3.5 px-6 rounded-xl transition-all shadow-lg select-none flex items-center justify-center gap-2"
+                      className="bg-amber-500 hover:bg-amber-400 text-black font-black text-xs px-6 py-3 rounded-xl transition-all shadow-md active:scale-95 cursor-pointer disabled:opacity-50"
                     >
-                      {socialsLoading ? (language === 'ar' ? 'جاري الحفظ...' : 'Saving...') : (language === 'ar' ? 'حفظ جميع الروابط' : 'Save Social Links')}
+                      {socialsLoading ? "جاري الحفظ..." : "حفظ روابط التواصل"}
                     </button>
                   </div>
                 </div>
@@ -4656,7 +6894,8 @@ const UserPanel = ({
   theme,
   language,
   isAppInstalled,
-  onInstallPWA
+  onInstallPWA,
+  stats
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
@@ -4664,19 +6903,36 @@ const UserPanel = ({
   allGames: Game[];
   onUpdateProfile: (data: Partial<UserProfileData>) => void;
   onSendReport: (msg: string) => void;
-  theme: 'dark' | 'light';
-  language: 'ar' | 'en';
+  theme: "dark" | "light";
+  language: "ar" | "en";
   isAppInstalled: boolean;
   onInstallPWA: () => void;
+  stats: {
+    totalDownloads: number;
+    totalUsers: number;
+    totalReviews: number;
+    totalFavorites: number;
+  };
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'favorites' | 'settings' | 'support' | 'assistant'>('assistant');
-  const [newName, setNewName] = useState(profile?.displayName || '');
+  const [newName, setNewName] = useState('');
+  const [newBio, setNewBio] = useState('');
+  const [newPhotoURL, setNewPhotoURL] = useState('');
+  const [panelSaveSuccess, setPanelSaveSuccess] = useState(false);
   const [reportMsg, setReportMsg] = useState('');
   const [assistantStep, setAssistantStep] = useState<1 | 2 | 3>(1);
   const [selectedSupportOption, setSelectedSupportOption] = useState<string>('');
   const [assistantMessage, setAssistantMessage] = useState<string>('');
   const [isSendingAssistant, setIsSendingAssistant] = useState<boolean>(false);
   const [userReports, setUserReports] = useState<Report[]>([]);
+
+  useEffect(() => {
+    if (profile) {
+      setNewName(profile.displayName || '');
+      setNewBio(profile.bio || '');
+      setNewPhotoURL(profile.photoURL || '');
+    }
+  }, [profile]);
 
   useEffect(() => {
     if (!isOpen || !profile?.uid) return;
@@ -4803,28 +7059,120 @@ const UserPanel = ({
                       {!profile.verified && profile.email !== 'frassa0000@gmail.com' && <span className="text-xs bg-zinc-800 text-zinc-400 border border-zinc-700 px-2.5 py-1 rounded-full font-black">عضو جديد</span>}
                     </h3>
                     <p className="text-zinc-500 text-sm mt-1">{profile.email}</p>
+                    <div className="mt-3 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl text-xs font-black mx-auto w-fit select-none shadow-md shadow-amber-950/10">
+                      <Coins className="w-3.5 h-3.5 text-amber-500" />
+                      <span>
+                        {profile.points || 0} {language === 'ar' ? 'نقطة' : 'Pts'}
+                      </span>
+                    </div>
+                    {profile.bio && (
+                      <p className="text-zinc-400 text-xs mt-3 max-w-md mx-auto italic font-semibold leading-relaxed bg-zinc-900/40 py-2 px-3.5 rounded-xl border border-zinc-800/50 break-words text-center">
+                        {profile.bio}
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-4">
-                  <h4 className="font-bold text-zinc-400">تعديل البيانات</h4>
-                  <div className="space-y-2">
-                    <label className="text-xs text-zinc-500 mr-2 uppercase tracking-widest font-black">الاسم المستعار</label>
-                    <div className="flex gap-2">
+                <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-5 text-right font-semibold animate-fade-in" dir="rtl">
+                  <h4 className="font-black text-sm text-zinc-400 mr-1 border-b border-zinc-800/20 pb-2 flex items-center gap-2">
+                    <span>✏️</span>
+                    <span>تعديل بيانات الملف الشخصي والوصف</span>
+                  </h4>
+                  
+                  {/* Nickname Entry */}
+                  <div className="space-y-1.5 text-right">
+                    <label className="text-xs text-zinc-500 font-extrabold mr-1">الاسم المستعار</label>
+                    <input 
+                      type="text" 
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      placeholder="أدخل اسمك الجديد"
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:border-red-650 outline-none transition-all font-bold text-right"
+                    />
+                  </div>
+
+                  {/* Image URL Entry */}
+                  <div className="space-y-1.5 text-right">
+                    <label className="text-xs text-zinc-500 font-extrabold mr-1">رابط الصورة الشخصية (Direct Photo URL)</label>
+                    <div className="flex flex-col sm:flex-row gap-3">
                       <input 
                         type="text" 
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        placeholder="أدخل اسمك الجديد"
-                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:border-red-600 outline-none transition-colors"
+                        value={newPhotoURL}
+                        onChange={(e) => setNewPhotoURL(e.target.value)}
+                        placeholder="ضع رابط الصورة المباشر هنا..."
+                        className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:border-red-650 outline-none transition-all font-semibold text-left"
+                        dir="ltr"
                       />
-                      <button 
-                        onClick={() => onUpdateProfile({ displayName: newName })}
-                        className="bg-red-600 hover:bg-red-700 text-white px-6 rounded-xl font-bold transition-all active:scale-95"
-                      >
-                        حفظ
-                      </button>
+                      
+                      {/* Presets List in Modal */}
+                      <div className="flex gap-1 items-center shrink-0">
+                        {[
+                          { name: 'Steve', url: 'https://mc-heads.net/avatar/MHF_Steve/64' },
+                          { name: 'Alex', url: 'https://mc-heads.net/avatar/MHF_Alex/64' },
+                          { name: 'Felix', url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix' },
+                          { name: 'Ender', url: 'https://api.dicebear.com/7.x/pixel-art/svg?seed=Ender' }
+                        ].map((p, pIdx) => (
+                          <button
+                            key={pIdx}
+                            type="button"
+                            onClick={() => setNewPhotoURL(p.url)}
+                            title={p.name}
+                            className={`w-9 h-9 rounded-lg overflow-hidden border transition-all ${newPhotoURL === p.url ? 'border-red-500 scale-105' : 'border-zinc-800 hover:border-zinc-600'}`}
+                          >
+                            <img src={p.url} className="w-full h-full object-cover animate-pulse" />
+                          </button>
+                        ))}
+                      </div>
                     </div>
+                  </div>
+
+                  {/* Bio Entry */}
+                  <div className="space-y-1.5 text-right">
+                    <div className="flex justify-between items-center mr-1">
+                      <label className="text-xs text-zinc-500 font-extrabold">الوصف الشخصي (Biography / Bio)</label>
+                      <span className="text-[10px] text-zinc-500 font-bold">{newBio.length}/150</span>
+                    </div>
+                    <textarea 
+                      value={newBio}
+                      onChange={(e) => setNewBio(e.target.value)}
+                      placeholder="اكتب نبذة قصيرة لتشرح فيها اهتماماتك..."
+                      maxLength={150}
+                      rows={3}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-sm focus:border-red-850 outline-none transition-all font-semibold resize-none text-right"
+                    />
+                  </div>
+
+                  {/* Success indicator inside modal */}
+                  {panelSaveSuccess && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl text-center text-xs font-black"
+                    >
+                      ✓ تم حفظ وتحديث بياناتك الشخصية بنجاح!
+                    </motion.div>
+                  )}
+
+                  {/* Submit Button */}
+                  <div className="pt-2 flex justify-end">
+                    <button 
+                      onClick={async () => {
+                        try {
+                          await onUpdateProfile({ 
+                            displayName: newName.trim(), 
+                            photoURL: newPhotoURL.trim(), 
+                            bio: newBio.trim() 
+                          });
+                          setPanelSaveSuccess(true);
+                          setTimeout(() => setPanelSaveSuccess(false), 3000);
+                        } catch (err) {
+                          console.error("Error updating profile inside modal panel:", err);
+                        }
+                      }}
+                      className="w-full sm:w-auto bg-gradient-to-r from-red-650 to-amber-500 hover:from-red-550 hover:to-amber-450 text-white px-8 py-3.5 rounded-2xl font-black text-xs transition-all active:scale-[0.98] shadow-lg shadow-red-550/10 cursor-pointer"
+                    >
+                      حفظ جميع التغييرات
+                    </button>
                   </div>
                 </div>
               </div>
@@ -4903,6 +7251,89 @@ const UserPanel = ({
                       >
                         {language === 'ar' ? 'فاتح' : 'Light'}
                       </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 📊 Page Interactions ("تفاعلات الصفحة") */}
+                <div className="bg-zinc-900/50 border border-zinc-800 p-6 rounded-3xl space-y-6 text-right" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+                  <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
+                    <span className="text-2xl">📊</span>
+                    <div>
+                      <h4 className="font-black text-lg text-white">
+                        {language === 'ar' ? 'تفاعلات الصفحة' : 'Page Interactions'}
+                      </h4>
+                      <p className="text-xs text-zinc-500">
+                        {language === 'ar' ? 'إحصائيات تفاعلية حقيقية ومباشرة من قاعدة البيانات' : 'Live real-time interaction stats straight from the database'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {/* 1. Total Downloads */}
+                    <div className="bg-zinc-950/80 border border-zinc-850 p-4 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 hover:border-zinc-700 transition duration-150">
+                      <span className="text-3xl">📥</span>
+                      <span className="text-2xl font-black text-red-500 tracking-tight">
+                        {stats.totalDownloads.toLocaleString()}
+                      </span>
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        {language === 'ar' ? 'إجمالي التحميلات الحقيقية' : 'Total Downloads'}
+                      </span>
+                    </div>
+
+                    {/* 2. Registered Users */}
+                    <div className="bg-zinc-950/80 border border-zinc-850 p-4 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 hover:border-zinc-700 transition duration-150">
+                      <span className="text-3xl">👤</span>
+                      <span className="text-2xl font-black text-amber-500 tracking-tight">
+                        {stats.totalUsers.toLocaleString()}
+                      </span>
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        {language === 'ar' ? 'الأعضاء المسجلين' : 'Registered Members'}
+                      </span>
+                    </div>
+
+                    {/* 3. Written Reviews */}
+                    <div className="bg-zinc-950/80 border border-zinc-850 p-4 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 hover:border-zinc-700 transition duration-150">
+                      <span className="text-3xl">💬</span>
+                      <span className="text-2xl font-black text-blue-500 tracking-tight">
+                        {stats.totalReviews.toLocaleString()}
+                      </span>
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        {language === 'ar' ? 'التعليقات والمراجعات' : 'Written Reviews'}
+                      </span>
+                    </div>
+
+                    {/* 4. Community Favorites */}
+                    <div className="bg-zinc-950/80 border border-zinc-850 p-4 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 hover:border-zinc-700 transition duration-150">
+                      <span className="text-3xl">❤️</span>
+                      <span className="text-2xl font-black text-rose-500 tracking-tight">
+                        {stats.totalFavorites.toLocaleString()}
+                      </span>
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        {language === 'ar' ? 'إجمالي تفضيلات الأعضاء' : 'Total Favorites'}
+                      </span>
+                    </div>
+
+                    {/* 5. Published Mods count */}
+                    <div className="bg-zinc-950/80 border border-zinc-850 p-4 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 hover:border-zinc-700 transition duration-150">
+                      <span className="text-3xl">📦</span>
+                      <span className="text-2xl font-black text-emerald-500 tracking-tight">
+                        {allGames.length}
+                      </span>
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        {language === 'ar' ? 'المودات والخرائط المتوفرة' : 'Published Content'}
+                      </span>
+                    </div>
+
+                    {/* 6. Active user's own saved favorites count */}
+                    <div className="bg-zinc-950/80 border border-zinc-850 p-4 rounded-2xl flex flex-col items-center justify-center text-center space-y-2 hover:border-zinc-700 transition duration-150">
+                      <span className="text-3xl">⭐</span>
+                      <span className="text-2xl font-black text-purple-500 tracking-tight">
+                        {profile?.favorites?.length || 0}
+                      </span>
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        {language === 'ar' ? 'مفضلاتك المحفوظة' : 'Your Saved Favorites'}
+                      </span>
                     </div>
                   </div>
                 </div>

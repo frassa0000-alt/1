@@ -182,7 +182,17 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
                             className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-500/20 cursor-pointer shadow-emerald-950/15"
                           >
                             <Crown className="w-4 h-4 text-white" />
-                            {language === 'ar' ? 'تحميل المود (مفتوح ✅)' : 'Download Mod (Unlocked ✅)'}
+                            <span>
+                              {(() => {
+                                const cat = (game.category || '').toLowerCase();
+                                const isAr = language === 'ar';
+                                if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تحميل السكن (مفتوح ✅)' : 'Download Skin (Unlocked ✅)';
+                                if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تحميل الخريطة (مفتوح ✅)' : 'Download Map (Unlocked ✅)';
+                                if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تحميل الشيدر (مفتوح ✅)' : 'Download Shader (Unlocked ✅)';
+                                if (cat === 'موارد' || cat === 'resources') return isAr ? 'تحميل المورد (مفتوح ✅)' : 'Download Resource (Unlocked ✅)';
+                                return isAr ? 'تحميل المود (مفتوح ✅)' : 'Download Mod (Unlocked ✅)';
+                              })()}
+                            </span>
                           </button>
                         ) : (
                           <button 
@@ -201,7 +211,17 @@ export const FavoritesTab: React.FC<FavoritesTabProps> = React.memo(({
                           className="w-full text-white text-xs font-black py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md bg-gradient-to-r from-red-650 to-amber-600 hover:from-red-600 hover:to-amber-500 border border-red-500/10 cursor-pointer shadow-rose-950/20"
                         >
                           <Download className="w-4 h-4 text-white" />
-                          {language === 'ar' ? 'تحميل المود' : 'Download Mod'}
+                          <span>
+                            {(() => {
+                              const cat = (game.category || '').toLowerCase();
+                              const isAr = language === 'ar';
+                              if (cat === 'سكنات' || cat === 'skins') return isAr ? 'تنزيل السكن' : 'Download Skin';
+                              if (cat === 'خرائط' || cat === 'maps') return isAr ? 'تنزيل الخريطة' : 'Download Map';
+                              if (cat === 'شيدرز' || cat === 'shaders' || cat === 'textures') return isAr ? 'تنزيل الشيدر' : 'Download Shader';
+                              if (cat === 'موارد' || cat === 'resources') return isAr ? 'تنزيل المورد' : 'Download Resource';
+                              return isAr ? 'تنزيل المود' : 'Download Mod';
+                            })()}
+                          </span>
                         </button>
                       )}
                     </div>

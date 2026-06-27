@@ -75,6 +75,22 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["imageUrl", "link"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "User reviews and ratings for mods",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "gameId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userPhoto": { "type": "string" },
+        "rating": { "type": "number" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["gameId", "userId", "userName", "rating", "comment"]
     }
   },
   "firestore": {
@@ -97,6 +113,10 @@
     "/ads/{adId}": {
       "schema": "Ad",
       "description": "Interactive advertising campaigns"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Mod reviews and comments"
     }
   }
 }
